@@ -1,7 +1,7 @@
 FROM python:3.12-slim
 
 ARG DEBIAN_FRONTEND=noninteractive
-ARG GATESOCKS_VERSION=0.2.0-dev
+ARG GATESOCKS_VERSION=0.2.1-dev
 
 LABEL org.opencontainers.image.title="GateSocks" \
       org.opencontainers.image.description="SOCKS5 exit manager and web panel" \
@@ -30,7 +30,7 @@ COPY static /app/static
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    GATESOCKS_BIND=127.0.0.1 \
+    GATESOCKS_BIND=0.0.0.0 \
     GATESOCKS_PORT=19080 \
     GATESOCKS_VERSION=${GATESOCKS_VERSION} \
     GATESOCKS_SOCKS_START=18001 \
