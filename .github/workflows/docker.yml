@@ -56,6 +56,6 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            GATESOCKS_VERSION=0.1.0-dev
+            GATESOCKS_VERSION=0.2.0-dev
           cache-from: type=gha
           cache-to: type=gha,mode=max
