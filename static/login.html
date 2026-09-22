@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>登录 · GateSocks</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body class="auth-body">
+  <main class="auth-card">
+    <div class="auth-brand"><div class="brand-mark">GS</div><div><strong>GateSocks</strong><span>SOCKS5 Exit Manager</span></div></div>
+    <h1>登录管理面板</h1>
+    <p>请输入 GateSocks 管理员账号。</p>
+    <form id="loginForm">
+      <label class="field"><span>用户名</span><input id="username" autocomplete="username" required autofocus></label>
+      <label class="field"><span>密码</span><input id="password" type="password" autocomplete="current-password" required></label>
+      <div class="auth-error" id="loginError"></div>
+      <button class="btn primary auth-submit" type="submit">登录</button>
+    </form>
+    <small class="auth-foot">GateSocks · v0.3.0-dev</small>
+  </main>
+<script>
+const form=document.getElementById("loginForm");
+const error=document.getElementById("loginError");
+(async()=>{try{const r=await fetch("/api/me",{cache:"no-store"});const m=await r.json();if(m.authenticated)location.replace("/");if(!m.configured)error.textContent="服务端尚未配置管理员密码与 Session Secret。";}catch(e){}})();
+form.addEventListener("submit",async e=>{
+  e.preventDefault(); error.textContent="";
+  const button=form.querySelector("button"); button.disabled=true; button.textContent="登录中…";
+  try{
+    const r=await fetch("/api/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username:document.getElementById("username").value,password:document.getElementById("password").value})});
+    const data=await r.json();
+    if(!r.ok) throw new Error(data.detail||"登录失败");
+    location.replace("/");
+  }catch(err){error.textContent=err.message;}finally{button.disabled=false;button.textContent="登录";}
+});
+</script>
+</body>
+</html>
