@@ -1,0 +1,23 @@
+services:
+  gatesocks:
+    image: ghcr.io/meyifan20-icloud/gatesocks:latest-dev
+    container_name: gatesocks
+    restart: unless-stopped
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      GATESOCKS_BIND: 127.0.0.1
+      GATESOCKS_PORT: 19080
+      GATESOCKS_VERSION: 0.1.0-dev
+    volumes:
+      - ./data:/app/data
+      - ./config:/app/config
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:19080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
