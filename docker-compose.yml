@@ -11,7 +11,11 @@ services:
     environment:
       GATESOCKS_BIND: 127.0.0.1
       GATESOCKS_PORT: 19080
-      GATESOCKS_VERSION: 0.1.0-dev
+      GATESOCKS_VERSION: 0.2.0-dev
+      GATESOCKS_SOCKS_START: 18001
+      GATESOCKS_SOCKS_END: 18099
+      GATESOCKS_TEST_START: 18100
+      GATESOCKS_TEST_END: 18149
     volumes:
       - ./data:/app/data
       - ./config:/app/config
@@ -20,4 +24,4 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 10s
+      start_period: 15s
