@@ -2,7 +2,7 @@
 
 GateSocks 是一个面向个人 VPS 的 SOCKS5 出口筛选、验证与管理项目。Web 面板负责节点池、SOCKS5、OpenVPN 隧道、测试记录、日志和设置；OpenVPN 是底层出口隧道，SOCKS5 是主要使用入口。
 
-当前开发版本：`v0.2.0-dev`。
+当前开发版本：`v0.2.1-dev`。
 
 ## Docker image
 
@@ -10,66 +10,45 @@ GateSocks 是一个面向个人 VPS 的 SOCKS5 出口筛选、验证与管理项
 ghcr.io/meyifan20-icloud/gatesocks:latest-dev
 ```
 
-提交到 `main` 会自动构建开发镜像。当前仅构建 `linux/amd64`，用于现有 RN VPS。
+## RN VPS deployment layout
 
-## Current Web panel
+GateSocks 使用普通 Docker bridge 网络，并加入现有 Sublink Caddy 所在的 `sublink-worker_default` 网络。这样现有 Caddy 可以直接通过容器名访问：
 
-已经实现：
+```text
+gatesocks:19080
+```
 
-- 响应式桌面 / 移动端 Web 面板
-- 仪表盘
-- 节点池页面骨架
-- SOCKS5 管理页面与本地/外部访问卡片结构
-- OpenVPN/TUN 状态检测
-- 测试记录页面骨架
-- 日志页面
-- 端口与运行设置页
-- FastAPI API 与健康检查
-
-下一阶段接入真实 VPN Gate 拉取、OpenVPN 节点连接、出口 IP/住宅属性/风险/速度/稳定性检测，以及 SOCKS5 实例创建与自动重连。
-
-## Runtime
-
-- Python 3.12 slim
-- FastAPI + Uvicorn
-- OpenVPN
-- iproute2 / iptables
-- `/dev/net/tun`
-- `NET_ADMIN`
-- host network
-
-Web 默认只监听：
+同时宿主机只保留本地健康检查：
 
 ```text
 127.0.0.1:19080
 ```
 
-SOCKS5 端口规划：
+如果实际 Sublink 网络名不同，可在启动前设置：
 
-```text
-18001-18099  正式 SOCKS5
-18100-18149  节点测试
-18150-18199  保留扩展
+```bash
+export SUBLINK_NETWORK=实际网络名
 ```
 
-## Start
+运行：
 
 ```bash
 docker compose pull
 docker compose up -d
-docker compose logs -f gatesocks
-```
-
-打开本机页面：
-
-```text
-http://127.0.0.1:19080/
-```
-
-健康检查：
-
-```bash
 curl http://127.0.0.1:19080/health
 ```
 
-> 当前仍是开发镜像。正式对公网开放管理面板前还需要完成认证与现有 Caddy / Cloudflare Origin Rule 接入。
+当前不会把 18001-18199 SOCKS5 端口直接暴露到公网；等用户名/密码认证和防火墙策略接入后再开放。
+
+## Caddy
+
+现有 Sublink Caddy 与 GateSocks 在同一个 Docker 网络后，新域名可以使用：
+
+```caddy
+gatesocks.zhangbao20.ccwu.cc:2096 {
+    tls /certs/fullchain.cer /certs/zhangbao20.ccwu.cc.key
+    reverse_proxy gatesocks:19080
+}
+```
+
+证书文件名请以现有 Sublink Caddyfile 的实际路径为准，不要凭示例覆盖现有配置。
