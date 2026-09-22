@@ -23,7 +23,7 @@ qsa(".nav-item").forEach(x=>x.onclick=()=>showPage(x.dataset.page));
 qsa("[data-jump]").forEach(x=>x.onclick=()=>showPage(x.dataset.jump));
 qs("#menuBtn").onclick=()=>qs("#sidebar").classList.toggle("open");
 qs("#refreshBtn").onclick=()=>loadAll();
-qs("#reloadLogs").onclick=()=>loadLogs();
+qs("#reloadLogs").onclick=()=>loadLogs();\nqs("#logoutBtn").onclick=async()=>{ await fetch("/api/logout",{method:"POST"}); location.replace("/login"); };
 
 function kv(label,value){
   const box=document.createElement("div"); box.className="kv";
