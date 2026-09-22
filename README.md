@@ -2,7 +2,7 @@
 
 GateSocks 是一个面向个人 VPS 的 SOCKS5 出口筛选、验证与管理项目。Web 面板负责节点池、SOCKS5、OpenVPN 隧道、测试记录、日志和设置；OpenVPN 是底层出口隧道，SOCKS5 是主要使用入口。
 
-当前开发版本：`v0.2.1-dev`。
+当前开发版本：`v0.3.0-dev`。
 
 ## Docker image
 
@@ -30,6 +30,14 @@ gatesocks:19080
 export SUBLINK_NETWORK=实际网络名
 ```
 
+运行前先设置管理员密码和 Session Secret：
+
+```bash
+export GATESOCKS_ADMIN_USER=admin
+export GATESOCKS_ADMIN_PASS='请设置强密码'
+export GATESOCKS_SESSION_SECRET="$(openssl rand -hex 32)"
+```
+
 运行：
 
 ```bash
@@ -52,3 +60,17 @@ gatesocks.zhangbao20.ccwu.cc:2096 {
 ```
 
 证书文件名请以现有 Sublink Caddyfile 的实际路径为准，不要凭示例覆盖现有配置。
+
+
+## Web authentication
+
+从 v0.3.0-dev 开始，管理页面与管理 API 默认需要登录；`/health` 保持公开供 Docker/Caddy 健康检查使用。
+
+- `POST /api/login`：登录并签发 HttpOnly Session Cookie
+- `POST /api/logout`：退出并删除 Cookie
+- `GET /api/me`：读取当前登录状态
+- Session 使用 HMAC-SHA256 签名并带过期时间，默认 12 小时
+- 密码和 Session Secret 只从环境变量读取，不写入仓库
+- 经 HTTPS 域名正式使用时设置 `GATESOCKS_COOKIE_SECURE=true`
+
+不要在公网暴露未配置认证的管理面板。
