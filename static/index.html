@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>GateSocks</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <div class="brand-mark">GS</div>
+      <div><strong>GateSocks</strong><span>SOCKS5 Exit Manager</span></div>
+    </div>
+    <nav>
+      <button class="nav-item active" data-page="dashboard">仪表盘</button>
+      <button class="nav-item" data-page="nodes">节点池</button>
+      <button class="nav-item" data-page="socks">SOCKS5</button>
+      <button class="nav-item" data-page="openvpn">OpenVPN</button>
+      <button class="nav-item" data-page="tests">测试记录</button>
+      <button class="nav-item" data-page="logs">日志</button>
+      <button class="nav-item" data-page="settings">设置</button>
+    </nav>
+    <div class="sidebar-foot">
+      <span id="version">v0.2.0-dev</span>
+      <span class="status-dot"></span> Development
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <button class="menu-btn" id="menuBtn">☰</button>
+      <div>
+        <h1 id="pageTitle">仪表盘</h1>
+        <p id="pageDesc">查看 GateSocks 当前运行状态与出口概况</p>
+      </div>
+      <div class="top-actions">
+        <span class="badge" id="serviceBadge">连接中</span>
+        <button class="btn ghost" id="refreshBtn">刷新</button>
+      </div>
+    </header>
+
+    <section class="page active" id="page-dashboard">
+      <div class="stats-grid">
+        <article class="stat"><span>SOCKS5 在线</span><strong id="statSocks">0</strong><small>当前可用出口</small></article>
+        <article class="stat"><span>OpenVPN 隧道</span><strong id="statTunnels">0</strong><small>已检测 TUN/TAP</small></article>
+        <article class="stat"><span>候选节点</span><strong id="statNodes">0</strong><small>等待节点引擎接入</small></article>
+        <article class="stat"><span>异常</span><strong id="statAlerts">0</strong><small>需要处理的状态</small></article>
+      </div>
+
+      <div class="grid-2">
+        <article class="panel">
+          <div class="panel-head"><div><h2>系统状态</h2><p>运行环境与后台能力</p></div><span class="pill ok">运行中</span></div>
+          <div class="kv-grid" id="systemInfo"></div>
+        </article>
+        <article class="panel">
+          <div class="panel-head"><div><h2>端口规划</h2><p>当前 GateSocks 默认端口池</p></div></div>
+          <div class="port-plan">
+            <div><strong>18001–18099</strong><span>正式 SOCKS5 出口</span></div>
+            <div><strong>18100–18149</strong><span>节点测试 / 验证</span></div>
+            <div><strong>18150–18199</strong><span>保留扩展</span></div>
+          </div>
+        </article>
+      </div>
+
+      <article class="panel">
+        <div class="panel-head"><div><h2>最近 SOCKS5</h2><p>生成后将在这里显示本地与外部访问信息</p></div><button class="btn primary" data-jump="nodes">选择节点</button></div>
+        <div class="empty">当前还没有 SOCKS5 实例。节点筛选引擎接入后可直接从节点池生成。</div>
+      </article>
+    </section>
+
+    <section class="page" id="page-nodes">
+      <article class="panel">
+        <div class="panel-head">
+          <div><h2>节点池</h2><p>候选节点将在后台完成连接、出口、住宅属性、速度与稳定性验证</p></div>
+          <div class="row-actions"><button class="btn ghost">拉取节点</button><button class="btn primary">开始筛选</button></div>
+        </div>
+        <div class="filters">
+          <select><option>全部地区</option><option>TW</option><option>US</option><option>JP</option><option>HK</option><option>SG</option></select>
+          <select><option>全部状态</option><option>可用</option><option>测试中</option><option>不可用</option></select>
+          <input placeholder="搜索 IP / ISP / 国家">
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>地区</th><th>节点 IP</th><th>ISP / ASN</th><th>住宅判断</th><th>延迟</th><th>下载</th><th>上传</th><th>稳定性</th><th>风险</th><th>状态</th><th>操作</th></tr></thead>
+            <tbody id="nodesTable"><tr><td colspan="11"><div class="empty compact">暂无节点数据</div></td></tr></tbody>
+          </table>
+        </div>
+      </article>
+    </section>
+
+    <section class="page" id="page-socks">
+      <article class="panel">
+        <div class="panel-head"><div><h2>SOCKS5 实例</h2><p>每个实例都对应一个持续维护的出口隧道</p></div><button class="btn primary" data-jump="nodes">生成 SOCKS5</button></div>
+        <div id="socksList" class="cards"><div class="empty">尚未生成 SOCKS5。生成后会分别显示本地访问、外部访问以及每个字段的独立复制按钮。</div></div>
+      </article>
+
+      <article class="panel example-card">
+        <div class="panel-head"><div><h2>访问卡片预览</h2><p>正式实例将采用这个结构</p></div><span class="pill">示例</span></div>
+        <div class="proxy-card">
+          <div class="proxy-head"><div><strong>TW-01</strong><span>出口与 SOCKS5 信息</span></div><span class="pill ok">在线</span></div>
+          <div class="mini-grid"><div><span>出口 IP</span><strong>等待生成</strong></div><div><span>ISP</span><strong>等待检测</strong></div><div><span>OpenVPN</span><strong>等待连接</strong></div></div>
+          <div class="access-grid">
+            <div class="access-box">
+              <h3>本地访问</h3>
+              <div class="copy-row"><span>地址</span><code>127.0.0.1</code><button disabled>复制</button></div>
+              <div class="copy-row"><span>端口</span><code>18001</code><button disabled>复制</button></div>
+              <div class="copy-row"><span>用户名</span><code>等待生成</code><button disabled>复制</button></div>
+              <div class="copy-row"><span>密码</span><code>等待生成</code><button disabled>复制</button></div>
+              <div class="copy-row wide"><span>完整地址</span><code>socks5://...</code><button disabled>复制</button></div>
+            </div>
+            <div class="access-box">
+              <h3>外部访问</h3>
+              <div class="copy-row"><span>地址</span><code>VPS 公网 IP</code><button disabled>复制</button></div>
+              <div class="copy-row"><span>端口</span><code>18001</code><button disabled>复制</button></div>
+              <div class="copy-row"><span>用户名</span><code>等待生成</code><button disabled>复制</button></div>
+              <div class="copy-row"><span>密码</span><code>等待生成</code><button disabled>复制</button></div>
+              <div class="copy-row wide"><span>完整地址</span><code>socks5://...</code><button disabled>复制</button></div>
+            </div>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <section class="page" id="page-openvpn">
+      <article class="panel">
+        <div class="panel-head"><div><h2>OpenVPN 状态</h2><p>保留底层隧道信息，SOCKS5 仍然是主要使用入口</p></div><span class="pill" id="tunBadge">检测中</span></div>
+        <div class="kv-grid" id="openvpnInfo"></div>
+        <div id="tunnelList" class="cards"></div>
+      </article>
+    </section>
+
+    <section class="page" id="page-tests">
+      <article class="panel">
+        <div class="panel-head"><div><h2>测试记录</h2><p>记录延迟、上下行、出口 IP、住宅判断、稳定性与失败原因</p></div><button class="btn ghost">清理记录</button></div>
+        <div class="empty">暂无测试记录</div>
+      </article>
+    </section>
+
+    <section class="page" id="page-logs">
+      <article class="panel">
+        <div class="panel-head"><div><h2>运行日志</h2><p>查看 GateSocks、SOCKS5 与隧道状态</p></div><button class="btn ghost" id="reloadLogs">刷新日志</button></div>
+        <div class="logbox" id="logBox">正在读取...</div>
+      </article>
+    </section>
+
+    <section class="page" id="page-settings">
+      <div class="grid-2">
+        <article class="panel">
+          <div class="panel-head"><div><h2>端口设置</h2><p>第一版按 RN VPS 已确认的空闲端口规划</p></div></div>
+          <label class="field"><span>SOCKS5 正式端口池</span><input value="18001-18099" readonly></label>
+          <label class="field"><span>测试端口池</span><input value="18100-18149" readonly></label>
+          <label class="field"><span>扩展保留</span><input value="18150-18199" readonly></label>
+        </article>
+        <article class="panel">
+          <div class="panel-head"><div><h2>Web 服务</h2><p>后续由现有 Caddy + Cloudflare Origin Rule 暴露</p></div></div>
+          <label class="field"><span>监听地址</span><input id="webBind" readonly></label>
+          <label class="field"><span>监听端口</span><input id="webPort" readonly></label>
+          <label class="field"><span>容器网络</span><input value="host" readonly></label>
+        </article>
+      </div>
+      <article class="panel notice">
+        <strong>开发版说明</strong>
+        <p>当前版本先完成真实 Web 面板、运行状态与接口骨架。节点抓取、真实测速、住宅/风险判断、SOCKS5 创建/认证及自动重连会在下一阶段接入。</p>
+      </article>
+    </section>
+  </main>
+</div>
+<script src="/static/app.js"></script>
+</body>
+</html>
