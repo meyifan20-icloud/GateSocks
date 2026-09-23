@@ -1,11 +1,14 @@
-name: Build GateSocks image
+name: GateSocks CI
 
 on:
   push:
     branches:
-      - main
+      - "**"
     tags:
       - "v*"
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -13,7 +16,7 @@ permissions:
   packages: write
 
 concurrency:
-  group: gatesocks-image-${{ github.ref }}
+  group: gatesocks-ci-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -21,11 +24,12 @@ env:
   IMAGE_NAME: ${{ github.repository_owner }}/gatesocks
 
 jobs:
-  build:
+  validate:
+    name: Validate
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Resolve version
         id: version
         shell: bash
@@ -34,7 +38,6 @@ jobs:
           VERSION="$(tr -d '\r\n' < VERSION)"
           test -n "$VERSION"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-
       - name: Preflight checks
         shell: bash
         run: |
@@ -51,6 +54,23 @@ jobs:
           expected = Path("VERSION").read_text(encoding="utf-8").strip()
           assert app.VERSION == expected, (app.VERSION, expected)
           PY
+
+  build:
+    name: Build GateSocks image
+    needs: validate
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(tr -d '\r\n' < VERSION)"
+          test -n "$VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
       - name: Set up Docker Buildx

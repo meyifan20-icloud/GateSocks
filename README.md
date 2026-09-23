@@ -231,3 +231,11 @@ gatesocks.zhangbao20.ccwu.cc:2096 {
 - 覆盖前执行 Compose 校验；启动后最多等待 60 秒，并要求 `/health` 返回版本与远端 VERSION 完全一致才判定升级成功。
 - 解决“镜像已更新但 VPS 仍使用旧 Compose”的部署漂移问题；本地 Git 是否存在 .gitignore 修改不再阻塞日常升级。
 - 安装一次命令别名后，后续只需运行 `gatesocks-update`。
+
+
+## v0.4.16-dev
+
+- 重构 GitHub Actions 为“先验证、后发布”：所有开发分支和 Pull Request 先执行完整 Preflight，只有 main 或 v* 标签在验证通过后才允许构建并推送镜像。
+- 开发修改不再需要直接拿 main 做第一次 CI 试错；后续维护可先在独立开发分支验证，同一提交通过后再快进 main，显著减少 main 中间失败提交及对应失败邮件。
+- 将 actions/checkout 从 v4 升级到 v5，适配 GitHub Actions 的 Node.js 24 运行环境，消除 checkout@v4 的 Node.js 20 弃用警告。
+- 保留 VERSION 单一版本源、Compose 防 GATESOCKS_VERSION 回归、Python/JS/Compose/单元测试等现有预检；镜像发布仍保持 ghcr.io/meyifan20-icloud/gatesocks:latest-dev。
