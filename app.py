@@ -41,7 +41,7 @@ SOCKS_SERVER_SCRIPT = APP_DIR / "socks_server.py"
 
 BIND = os.getenv("GATESOCKS_BIND", "0.0.0.0")
 PORT = int(os.getenv("GATESOCKS_PORT", "19080"))
-VERSION = os.getenv("GATESOCKS_VERSION", "0.4.8-dev")
+VERSION = os.getenv("GATESOCKS_VERSION", "0.4.9-dev")
 SOCKS_START = int(os.getenv("GATESOCKS_SOCKS_START", "18001"))
 SOCKS_END = int(os.getenv("GATESOCKS_SOCKS_END", "18099"))
 TEST_START = int(os.getenv("GATESOCKS_TEST_START", "18100"))
@@ -57,6 +57,8 @@ COOKIE_NAME = "gatesocks_session"
 VPNGATE_URL = os.getenv("GATESOCKS_VPNGATE_URL", "https://www.vpngate.net/api/iphone/")
 VPNGATE_TIMEOUT = int(os.getenv("GATESOCKS_VPNGATE_TIMEOUT", "15"))
 VPNGATE_MAX_NODES = int(os.getenv("GATESOCKS_VPNGATE_MAX_NODES", "500"))
+VPNGATE_USERNAME = os.getenv("GATESOCKS_VPNGATE_USERNAME", "vpn")
+VPNGATE_PASSWORD = os.getenv("GATESOCKS_VPNGATE_PASSWORD", "vpn")
 TEST_BATCH_LIMIT = int(os.getenv("GATESOCKS_TEST_BATCH_LIMIT", "5"))
 TEST_MAX_BATCH = int(os.getenv("GATESOCKS_TEST_MAX_BATCH", "200"))
 TEST_CONNECT_TIMEOUT = int(os.getenv("GATESOCKS_TEST_CONNECT_TIMEOUT", "30"))
@@ -551,10 +553,24 @@ def sanitized_ovpn(config_b64: str) -> str:
     return "\n".join(output) + "\n"
 
 
-def build_openvpn_command(config_path: Path, tun_name: str) -> list[str]:
+def write_vpngate_auth_file(work_dir: Path) -> Path:
+    work_dir.mkdir(parents=True, exist_ok=True)
+    auth_path = work_dir / "vpngate.auth"
+    auth_path.write_text(
+        f"{VPNGATE_USERNAME}\n{VPNGATE_PASSWORD}\n",
+        encoding="utf-8",
+    )
+    os.chmod(auth_path, 0o600)
+    return auth_path
+
+
+def build_openvpn_command(config_path: Path, tun_name: str, auth_path: Path | None = None) -> list[str]:
+    if auth_path is None:
+        auth_path = write_vpngate_auth_file(config_path.parent)
     return [
         "openvpn",
         "--config", str(config_path),
+        "--auth-user-pass", str(auth_path),
         "--dev", tun_name,
         "--dev-type", "tun",
         "--disable-dco",
@@ -624,8 +640,9 @@ def test_one_node(node: dict) -> dict:
 
     try:
         config_path.write_text(sanitized_ovpn(str(node.get("openvpn_config_b64", ""))), encoding="utf-8")
+        auth_path = write_vpngate_auth_file(work_dir)
         log_handle = log_path.open("w", encoding="utf-8")
-        cmd = build_openvpn_command(config_path, tun_name)
+        cmd = build_openvpn_command(config_path, tun_name, auth_path)
         proc = subprocess.Popen(cmd, stdout=log_handle, stderr=subprocess.STDOUT, text=True)
 
         deadline = time.time() + TEST_CONNECT_TIMEOUT
@@ -934,7 +951,10 @@ def wait_openvpn_ready(proc: subprocess.Popen, log_path: Path, tun_name: str) ->
         tail = log_path.read_text(encoding="utf-8", errors="replace")[-900:]
     except Exception:
         tail = ""
-    raise RuntimeError("OpenVPN 未建立长期隧道：" + tail.replace("\n", " ")[-650:])
+    compact_tail = tail.replace("\n", " ")[-650:]
+    if "AUTH_FAILED" in tail:
+        raise RuntimeError("OpenVPN 认证失败（VPN Gate 凭据已由 GateSocks 受控提供）：" + compact_tail)
+    raise RuntimeError("OpenVPN 未建立长期隧道：" + compact_tail)
 
 
 def wait_socks_listener(proc: subprocess.Popen, port: int) -> None:
@@ -1049,7 +1069,8 @@ def start_socks_instance(instance_id: str) -> dict:
             openvpn_handle = openvpn_log.open("a", encoding="utf-8")
             openvpn_handle.write(f"\n=== GateSocks start {datetime.now(timezone.utc).isoformat()} ===\n")
             openvpn_handle.flush()
-            vpn_proc = subprocess.Popen(build_openvpn_command(config_path, str(instance["tun_name"])), stdout=openvpn_handle, stderr=subprocess.STDOUT, text=True)
+            auth_path = write_vpngate_auth_file(work_dir)
+            vpn_proc = subprocess.Popen(build_openvpn_command(config_path, str(instance["tun_name"]), auth_path), stdout=openvpn_handle, stderr=subprocess.STDOUT, text=True)
             SOCKS_RUNTIME[instance_id] = {"openvpn": vpn_proc, "socks": None, "openvpn_log_handle": openvpn_handle, "socks_log_handle": None}
             wait_openvpn_ready(vpn_proc, openvpn_log, str(instance["tun_name"]))
             install_instance_policy(instance)

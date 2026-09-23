@@ -6,7 +6,7 @@
   <title>GateSocks</title>
   <link rel="icon" href="/favicon.ico" sizes="any">
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-  <link rel="stylesheet" href="/static/app.css?v=0.4.8-dev">
+  <link rel="stylesheet" href="/static/app.css?v=0.4.9-dev">
 </head>
 <body>
 <div class="app-shell">
@@ -25,7 +25,7 @@
       <button class="nav-item" data-page="settings">设置</button>
     </nav>
     <div class="sidebar-foot">
-      <span id="version">v0.4.8-dev</span>
+      <span id="version">v0.4.9-dev</span>
       <span class="status-dot"></span> Development
     </div>
   </aside>
@@ -77,7 +77,7 @@
           <div class="row-actions"><button class="btn ghost" id="refreshNodesBtn">拉取节点</button><button class="btn ghost" id="selectAllTestsBtn">全选当前筛选</button><button class="btn ghost" id="clearTestSelectionBtn">清空测试选择</button><button class="btn primary" id="startFilterBtn">开始实测（0）</button></div>
         </div>
         <div class="node-meta" id="nodeSourceMeta">正在读取候选节点…</div>
-        <div class="node-meta" id="testJobMeta">测试选择只认每行最前面的复选框；点击“节点 IP”只设置仪表盘的待生成节点。已运行 SOCKS5 实例不会因此被替换或停止。</div>
+        <div class="node-meta" id="testJobMeta">测试选择只认每行最前面的复选框；点击“节点 IP”只设置 SOCKS5 页面顶部的待生成节点。已运行 SOCKS5 实例不会因此被替换或停止。</div>
         <div class="filters">
           <select id="countryFilter"><option value="">全部地区</option></select>
           <select id="nodeStatusFilter"><option value="">全部状态</option><option value="candidate">候选</option><option value="available">实测通过</option><option value="testing">测试中</option><option value="unavailable">本次实测失败</option></select>
@@ -179,6 +179,6 @@
     <code id="qrText" class="qr-text"></code>
   </div>
 </div>
-<script src="/static/app.js?v=0.4.8-dev"></script>
+<script src="/static/app.js?v=0.4.9-dev"></script>
 </body>
 </html>

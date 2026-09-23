@@ -2,7 +2,7 @@
 
 GateSocks 是一个面向个人 VPS 的 SOCKS5 出口筛选、验证与管理项目。Web 面板负责节点池、SOCKS5、OpenVPN 隧道、测试记录、日志和设置；OpenVPN 是底层出口隧道，SOCKS5 是主要使用入口。
 
-当前开发版本：`v0.4.8-dev`。
+当前开发版本：`v0.4.9-dev`。
 
 ## Docker image
 
@@ -162,3 +162,12 @@ gatesocks.zhangbao20.ccwu.cc:2096 {
 - 仪表盘不再展示待生成节点区域，仅保留运行状态、端口规划等总览信息。
 - 删除 SOCKS5 页面原有“SOCKS5 实例”说明标题、“新增 SOCKS5 实例”按钮以及新增流程说明，避免和顶部待生成节点区域重复。
 - SOCKS5 已生成实例列表继续保留在待生成节点区域下方；节点池文案同步改为“点击 IP 设置 SOCKS5 页面顶部的待生成节点”。
+
+
+## v0.4.9-dev
+
+- 修复生成 SOCKS5 后长期 OpenVPN 在 TLS 已成功后出现 `AUTH_FAILED` 的问题。
+- 继续禁止信任 VPN Gate 上游配置中的 `auth-user-pass <任意路径>`；GateSocks 会在自己的临时/实例目录生成权限为 0600 的受控认证文件，并通过命令行显式传给 OpenVPN。
+- VPN Gate 默认凭据为 `vpn / vpn`，可通过 `GATESOCKS_VPNGATE_USERNAME` / `GATESOCKS_VPNGATE_PASSWORD` 覆盖；临时节点实测和长期 SOCKS5 隧道统一使用同一认证机制。
+- 已存在的 v0.4.8 SOCKS5 实例不需要删除重建；升级后执行“启动”或“重新连接”时会自动生成受控认证文件并使用新认证逻辑。
+- `AUTH_FAILED` 现在会明确标记为 OpenVPN 认证失败，便于与“节点不可达 / No route to host”区分。

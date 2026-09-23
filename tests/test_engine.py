@@ -29,12 +29,13 @@ CERTDATA
         self.assertNotIn("dev tun", clean)
 
     def test_openvpn_command_has_explicit_tun_and_vpngate_cipher(self):
-        cmd = app.build_openvpn_command(Path("/tmp/test.ovpn"), "tun-gstest0")
+        cmd = app.build_openvpn_command(Path("/tmp/test.ovpn"), "tun-gstest0", Path("/tmp/vpngate.auth"))
         joined = " ".join(cmd)
         self.assertIn("--dev tun-gstest0", joined)
         self.assertIn("--dev-type tun", joined)
         self.assertIn("--disable-dco", joined)
         self.assertIn("--route-nopull", joined)
+        self.assertIn("--auth-user-pass /tmp/vpngate.auth", joined)
         self.assertIn("AES-128-CBC", joined)
         self.assertNotIn("--hand-window", joined)
 
@@ -67,6 +68,22 @@ CERTDATA
     def test_socks_uri_brackets_ipv6(self):
         uri = app.build_socks_uri("2001:db8::1", 18001, "u", "p")
         self.assertEqual(uri, "socks5://u:p@[2001:db8::1]:18001")
+
+    def test_vpngate_auth_file_is_controlled(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            auth_path = app.write_vpngate_auth_file(Path(tmp))
+            self.assertEqual(auth_path.read_text(encoding="utf-8"), f"{app.VPNGATE_USERNAME}\n{app.VPNGATE_PASSWORD}\n")
+            self.assertEqual(auth_path.stat().st_mode & 0o777, 0o600)
+
+    def test_profile_auth_path_is_not_trusted(self):
+        raw = """client
+auth-user-pass /etc/shadow
+remote 203.0.113.10 443
+"""
+        clean = app.sanitized_ovpn(base64.b64encode(raw.encode()).decode())
+        self.assertNotIn("auth-user-pass", clean)
+        self.assertIn("remote 203.0.113.10 443", clean)
 
 
 if __name__ == "__main__":
