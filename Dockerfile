@@ -1,7 +1,7 @@
 FROM python:3.12-slim
 
 ARG DEBIAN_FRONTEND=noninteractive
-ARG GATESOCKS_VERSION=0.4.6-dev
+ARG GATESOCKS_VERSION=0.4.7-dev
 
 LABEL org.opencontainers.image.title="GateSocks" \
       org.opencontainers.image.description="SOCKS5 exit manager and web panel" \

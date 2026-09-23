@@ -215,9 +215,9 @@ function renderNodes(){
     const countryTd=document.createElement("td"); countryTd.textContent=n.country_short||"-"; tr.appendChild(countryTd);
     const ipTd=document.createElement("td");
     const ipButton=document.createElement("button"); ipButton.type="button"; ipButton.className="ip-select-btn"+(n.selected?" selected":"");
-    ipButton.title="点击设为仪表盘当前使用节点（单选）"; ipButton.textContent=n.exit_ip?(n.ip+" → "+n.exit_ip):(n.ip||"-"); ipButton.onclick=()=>selectNode(n.id);
+    ipButton.title="点击设为仪表盘当前待生成节点（单选，不直接生效）"; ipButton.textContent=n.exit_ip?(n.ip+" → "+n.exit_ip):(n.ip||"-"); ipButton.onclick=()=>selectNode(n.id);
     ipTd.appendChild(ipButton);
-    if(n.selected){const badge=document.createElement("span");badge.className="ip-selected-badge";badge.textContent="当前使用";ipTd.appendChild(badge);tr.classList.add("selected-row");}
+    if(n.selected){const badge=document.createElement("span");badge.className="ip-selected-badge";badge.textContent="待生成";ipTd.appendChild(badge);tr.classList.add("selected-row");}
     tr.appendChild(ipTd);
     const values=[
       n.source_ping_ms==null?"-":fmt(n.source_ping_ms," ms*"),
@@ -293,34 +293,77 @@ async function selectNode(nodeId){
   }
 }
 
+async function createSocksFromSelected(nodeId,button,message){
+  if(!nodeId) return;
+  const old=button.textContent;
+  button.disabled=true;
+  button.textContent="生成中…";
+  if(message){message.textContent="正在建立长期 OpenVPN 隧道并启动 SOCKS5，这一步可能需要几十秒。";message.className="form-message";}
+  try{
+    const data=await getJson("/api/socks",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({node_id:nodeId})
+    });
+    const item=data.instance||{};
+    await Promise.all([loadSocks(),loadOpenVPN(),loadStatus()]);
+    if(item.status==="online"){
+      if(message){message.textContent="SOCKS5 已生成并启用："+(item.name||item.id);message.className="form-message ok";}
+      showPage("socks");
+    }else{
+      if(message){message.textContent="实例已建立记录，但启动失败："+(item.last_error||item.status||"未知错误");message.className="form-message error";}
+    }
+  }catch(e){
+    if(message){message.textContent="生成 SOCKS5 失败："+e.message;message.className="form-message error";}
+  }finally{
+    button.disabled=false;
+    button.textContent=old;
+    await loadSelectedNode();
+  }
+}
+
 async function loadSelectedNode(){
   const box=qs("#selectedNodeCard");
   if(!box) return;
   try{
     const data=await getJson("/api/nodes/selected");
     const n=data.selected;
-    if(!n){box.className="empty";box.textContent="当前还没有选择节点。";return;}
+    if(!n){box.className="empty";box.textContent="当前还没有待生成节点。请到节点池直接点击一个 IP。";return;}
     box.className="selected-summary";
     box.innerHTML="";
+    const content=document.createElement("div");
+    content.className="selected-content";
     const title=document.createElement("strong");
     title.textContent=(n.country_short||"-")+" · "+(n.ip||"-");
     const detail=document.createElement("span");
     const parts=[];
-    if(n.exit_ip) parts.push("出口 "+n.exit_ip);
+    if(n.exit_ip) parts.push("最近实测出口 "+n.exit_ip);
     if(n.status) parts.push(statusText(n.status));
-    parts.push("当前使用节点（单选）");
+    parts.push("待生成节点（单选，不直接生效）");
     detail.textContent=parts.join(" · ");
+    const message=document.createElement("div");
+    message.className="form-message";
+    content.append(title,detail,message);
+
+    const actions=document.createElement("div");
+    actions.className="selected-actions";
+    const generate=document.createElement("button");
+    generate.className="btn primary";
+    generate.textContent="生成并启用 SOCKS5";
+    generate.onclick=()=>createSocksFromSelected(n.id||n.node_id,generate,message);
     const clear=document.createElement("button");
-    clear.className="btn ghost"; clear.textContent="取消选择";
+    clear.className="btn ghost";
+    clear.textContent="取消待生成";
     clear.onclick=async()=>{
       await getJson("/api/nodes/selected",{method:"DELETE"});
       allNodes=allNodes.map(x=>({...x,selected:false}));
       renderNodes();
       await loadSelectedNode();
     };
-    box.append(title,detail,clear);
+    actions.append(generate,clear);
+    box.append(content,actions);
   }catch(e){
-    box.className="empty";box.textContent="当前选择节点读取失败";
+    box.className="empty";box.textContent="待生成节点读取失败";
   }
 }
 
@@ -447,6 +490,57 @@ async function loadTests(){
     });
   }catch(e){list.innerHTML="<div class=\"empty\">测试记录读取失败</div>";}
 }
+function socksStatusText(status){
+  return {online:"在线",starting:"启动中",stopped:"已停止",error:"异常",created:"已创建"}[status]||status||"-";
+}
+
+function makeInstanceAction(label,className,handler){
+  const b=document.createElement("button");
+  b.className="btn "+(className||"ghost");
+  b.textContent=label;
+  b.onclick=handler;
+  return b;
+}
+
+async function runInstanceAction(item,action,button){
+  const old=button.textContent;
+  button.disabled=true;
+  button.textContent="处理中…";
+  try{
+    await getJson("/api/socks/"+encodeURIComponent(item.id)+"/"+action,{method:"POST"});
+  }catch(e){
+    alert(e.message);
+  }finally{
+    button.disabled=false;
+    button.textContent=old;
+    await Promise.all([loadSocks(),loadOpenVPN(),loadStatus()]);
+  }
+}
+
+async function deleteInstance(item,button){
+  const ok=confirm("确认删除 "+(item.name||item.id)+"？\n\n这会停止对应 SOCKS5 与 OpenVPN、清理策略路由、删除实例配置并释放端口 "+item.port+"。\n节点池和历史测试记录不会删除。");
+  if(!ok) return;
+  const old=button.textContent;
+  button.disabled=true;
+  button.textContent="删除中…";
+  try{
+    await getJson("/api/socks/"+encodeURIComponent(item.id),{method:"DELETE"});
+  }catch(e){
+    alert(e.message);
+  }finally{
+    button.disabled=false;
+    button.textContent=old;
+    await Promise.all([loadSocks(),loadOpenVPN(),loadStatus()]);
+  }
+}
+
+function appendMetric(grid,label,value){
+  const d=document.createElement("div");
+  const s=document.createElement("span"); s.textContent=label;
+  const v=document.createElement("strong"); v.textContent=value||"-";
+  d.append(s,v); grid.appendChild(d);
+}
+
 async function loadSocks(){
   const list=qs("#socksList");
   if(!list) return;
@@ -454,7 +548,7 @@ async function loadSocks(){
     const data=await getJson("/api/socks");
     const items=data.items||[];
     if(!items.length){
-      list.innerHTML='<div class="empty">尚未生成 SOCKS5。正式实例生成后，外部访问每条文本会同时提供“复制”和“二维码”；完整地址二维码可直接用于支持 SOCKS5 URI 的移动代理客户端扫码添加。</div>';
+      list.innerHTML='<div class="empty">尚未生成 SOCKS5 实例。先到节点池点击一个 IP，再从仪表盘“当前待生成节点”生成。</div>';
       return;
     }
     list.innerHTML="";
@@ -463,23 +557,79 @@ async function loadSocks(){
       const head=document.createElement("div"); head.className="proxy-head";
       const left=document.createElement("div");
       const title=document.createElement("strong"); title.textContent=item.name||("SOCKS5-"+(index+1));
-      const sub=document.createElement("span"); sub.textContent=item.exit_ip?("出口 "+item.exit_ip):"SOCKS5 外部访问";
+      const sub=document.createElement("span");
+      sub.textContent=(item.country_short||"-")+" · 接入 "+(item.source_ip||"-")+" · 端口 "+item.port;
       left.append(title,sub);
-      const state=document.createElement("span"); state.className="pill ok"; state.textContent=item.status||"在线";
+      const state=document.createElement("span");
+      state.className="pill "+(item.status==="online"?"ok":item.status==="error"?"error":item.status==="starting"?"warn":"");
+      state.textContent=socksStatusText(item.status);
       head.append(left,state); card.appendChild(head);
-      const access=document.createElement("div"); access.className="access-box";
-      const h=document.createElement("h3"); h.textContent="外部访问";
-      const note=document.createElement("p"); note.className="access-note"; note.textContent="完整地址二维码可供支持 SOCKS5 URI 的移动代理客户端扫码添加。";
-      access.append(h,note);
-      appendAccessRow(access,"地址",item.host||item.address||"",true);
-      appendAccessRow(access,"端口",item.port?String(item.port):"",true);
-      appendAccessRow(access,"用户名",item.username||"",true);
-      appendAccessRow(access,"密码",item.password||"",true);
-      appendAccessRow(access,"完整地址",item.url||item.uri||"",true);
-      card.appendChild(access); list.appendChild(card);
+
+      const grid=document.createElement("div"); grid.className="mini-grid";
+      appendMetric(grid,"接入节点",item.source_ip||"-");
+      appendMetric(grid,"真实出口",item.exit_ip||"-");
+      appendMetric(grid,"ISP / ASN",[item.isp,item.asn].filter(Boolean).join(" / ")||"-");
+      appendMetric(grid,"OpenVPN / TUN",item.tun_name||"-");
+      const probe=item.last_probe||{};
+      appendMetric(grid,"最近实测",probe.tested_at?new Date(probe.tested_at).toLocaleString():"-");
+      appendMetric(grid,"实测速度",probe.download_mbps!=null?(probe.download_mbps+"↓ / "+(probe.upload_mbps??"-")+"↑ Mbps"):"-");
+      card.appendChild(grid);
+
+      const accessGrid=document.createElement("div"); accessGrid.className="access-grid";
+      const local=document.createElement("div"); local.className="access-box";
+      const lh=document.createElement("h3"); lh.textContent="本地访问";
+      const ln=document.createElement("p"); ln.className="access-note"; ln.textContent="VPS 本机使用；停止实例后该端口不再监听。";
+      local.append(lh,ln);
+      appendAccessRow(local,"地址",item.local_host||"127.0.0.1",false);
+      appendAccessRow(local,"端口",item.port?String(item.port):"",false);
+      appendAccessRow(local,"用户名",item.username||"",false);
+      appendAccessRow(local,"密码",item.password||"",false);
+      appendAccessRow(local,"完整地址",item.local_uri||"",false);
+
+      const external=document.createElement("div"); external.className="access-box";
+      const eh=document.createElement("h3"); eh.textContent="外部访问";
+      const en=document.createElement("p"); en.className="access-note";
+      en.textContent=item.host?"完整地址二维码可供支持 SOCKS5 URI 的移动代理客户端扫码添加。":"未自动识别 VPS 公网地址；可通过 GATESOCKS_PUBLIC_HOST 指定后再使用外部二维码。";
+      external.append(eh,en);
+      appendAccessRow(external,"地址",item.host||"",true);
+      appendAccessRow(external,"端口",item.port?String(item.port):"",true);
+      appendAccessRow(external,"用户名",item.username||"",true);
+      appendAccessRow(external,"密码",item.password||"",true);
+      appendAccessRow(external,"完整地址",item.url||"",true);
+      accessGrid.append(local,external);
+      card.appendChild(accessGrid);
+
+      if(item.last_error){
+        const err=document.createElement("p");
+        err.className="instance-error";
+        err.textContent="最近错误："+item.last_error;
+        card.appendChild(err);
+      }
+
+      const actions=document.createElement("div"); actions.className="instance-actions";
+      if(item.status==="online"||item.status==="starting"){
+        const stop=makeInstanceAction("停止","ghost",()=>runInstanceAction(item,"stop",stop));
+        actions.appendChild(stop);
+      }else{
+        const start=makeInstanceAction("启动","primary",()=>runInstanceAction(item,"start",start));
+        actions.appendChild(start);
+      }
+      const reconnect=makeInstanceAction("重新连接","ghost",()=>runInstanceAction(item,"reconnect",reconnect));
+      actions.appendChild(reconnect);
+      if(item.status==="online"){
+        const retest=makeInstanceAction("重新测试","ghost",()=>runInstanceAction(item,"test",retest));
+        actions.appendChild(retest);
+      }
+      const del=makeInstanceAction("删除实例","danger",()=>deleteInstance(item,del));
+      actions.appendChild(del);
+      card.appendChild(actions);
+      list.appendChild(card);
     });
-  }catch(e){list.innerHTML='<div class="empty">SOCKS5 信息读取失败</div>';}
+  }catch(e){
+    list.innerHTML='<div class="empty">SOCKS5 信息读取失败：'+e.message+'</div>';
+  }
 }
+
 async function loadOpenVPN(){
   try{
     const o=await getJson("/api/openvpn");

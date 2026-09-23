@@ -41,7 +41,7 @@ SOCKS_SERVER_SCRIPT = APP_DIR / "socks_server.py"
 
 BIND = os.getenv("GATESOCKS_BIND", "0.0.0.0")
 PORT = int(os.getenv("GATESOCKS_PORT", "19080"))
-VERSION = os.getenv("GATESOCKS_VERSION", "0.4.6-dev")
+VERSION = os.getenv("GATESOCKS_VERSION", "0.4.7-dev")
 SOCKS_START = int(os.getenv("GATESOCKS_SOCKS_START", "18001"))
 SOCKS_END = int(os.getenv("GATESOCKS_SOCKS_END", "18099"))
 TEST_START = int(os.getenv("GATESOCKS_TEST_START", "18100"))
@@ -1287,9 +1287,9 @@ def status():
         "openvpn": openvpn_version(),
         "tun_present": os.path.exists("/dev/net/tun"),
         "tunnel_count": len(tunnels),
-        "socks_online": 0,
+        "socks_online": sum(1 for item in read_socks_instances() if runtime_active(str(item.get("id")))),
         "candidate_nodes": len(node_cache.get("items", [])),
-        "alerts": 0,
+        "alerts": sum(1 for item in read_socks_instances() if item.get("status") == "error"),
         "bind": BIND,
         "port": PORT,
     }
@@ -1359,7 +1359,7 @@ async def select_node(request: Request):
     atomic_write_json(SELECTED_NODE_FILE, selected)
     return {
         "ok": True,
-        "message": "节点已选择；测试结果仅供参考，不限制手动选择。",
+        "message": "已设为待生成节点；这不会直接改变任何已运行 SOCKS5 实例。",
         "selected": selected,
     }
 
@@ -1528,7 +1528,8 @@ async def create_socks(request: Request):
 @app.post("/api/socks/{instance_id}/start")
 def start_socks(instance_id: str):
     try:
-        return {"ok": True, "instance": start_socks_instance(instance_id)}
+        item = start_socks_instance(instance_id)
+        return {"ok": item.get("status") == "online", "instance": item}
     except KeyError as exc:
         return JSONResponse({"detail": str(exc).strip("'")}, status_code=404)
 
@@ -1545,7 +1546,8 @@ def stop_socks(instance_id: str):
 def reconnect_socks(instance_id: str):
     try:
         stop_socks_instance(instance_id)
-        return {"ok": True, "instance": start_socks_instance(instance_id)}
+        item = start_socks_instance(instance_id)
+        return {"ok": item.get("status") == "online", "instance": item}
     except KeyError as exc:
         return JSONResponse({"detail": str(exc).strip("'")}, status_code=404)
 
