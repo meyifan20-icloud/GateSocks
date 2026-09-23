@@ -93,7 +93,7 @@ async function loadStatus(){
 }
 
 function statusText(value){
-  return {candidate:"候选",available:"可用",testing:"测试中",unavailable:"不可用"}[value]||value||"-";
+  return {candidate:"候选",available:"实测通过",testing:"测试中",unavailable:"本次实测失败"}[value]||value||"-";
 }
 
 function filteredNodes(){
@@ -132,7 +132,7 @@ function renderNodes(){
     const values=[
       n.country_short||"-",
       n.exit_ip?(n.ip+" → "+n.exit_ip):(n.ip||"-"),
-      n.isp||n.asn||"待实测",
+      [n.isp,n.asn].filter(Boolean).join(" / ")||"待实测",
       n.residential_hint||"待实测",
       n.latency_ms!=null?fmt(n.latency_ms," ms"):n.source_ping_ms==null?"-":fmt(n.source_ping_ms," ms*"),
       n.download_mbps!=null?fmt(n.download_mbps," Mbps"):n.source_speed_mbps==null?"-":fmt(n.source_speed_mbps," Mbps*"),
@@ -143,8 +143,12 @@ function renderNodes(){
     ];
     values.forEach(value=>{const td=document.createElement("td"); td.textContent=value; tr.appendChild(td);});
     const action=document.createElement("td");
-    const button=document.createElement("button"); button.className="btn ghost"; button.disabled=true;
-    button.textContent=n.status==="available"?"已实测":"待实测";
+    const button=document.createElement("button");
+    button.className=n.selected?"btn primary":"btn ghost";
+    button.disabled=false;
+    button.textContent=n.selected?"已选择":"选择";
+    button.onclick=()=>selectNode(n.id);
+    if(n.selected) tr.classList.add("selected-row");
     action.appendChild(button); tr.appendChild(action); table.appendChild(tr);
   });
 }
@@ -183,6 +187,91 @@ async function loadNodes(refresh=false){
     if(startFilterBtn) startFilterBtn.disabled=true;
   }finally{
     if(button){button.disabled=false;button.textContent="拉取节点";}
+  }
+}
+
+async function selectNode(nodeId){
+  const meta=qs("#testJobMeta");
+  try{
+    const data=await getJson("/api/nodes/select",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({node_id:nodeId})
+    });
+    allNodes=allNodes.map(n=>({...n,selected:n.id===nodeId}));
+    renderNodes();
+    await loadSelectedNode();
+    if(meta) meta.textContent=data.message||"节点已选择";
+  }catch(e){
+    if(meta) meta.textContent="选择节点失败："+e.message;
+  }
+}
+
+async function loadSelectedNode(){
+  const box=qs("#selectedNodeCard");
+  if(!box) return;
+  try{
+    const data=await getJson("/api/nodes/selected");
+    const n=data.selected;
+    if(!n){box.className="empty";box.textContent="当前还没有选择节点。";return;}
+    box.className="selected-summary";
+    box.innerHTML="";
+    const title=document.createElement("strong");
+    title.textContent=(n.country_short||"-")+" · "+(n.ip||"-");
+    const detail=document.createElement("span");
+    const parts=[];
+    if(n.exit_ip) parts.push("出口 "+n.exit_ip);
+    if(n.status) parts.push(statusText(n.status));
+    parts.push("测试结果不限制选择");
+    detail.textContent=parts.join(" · ");
+    const clear=document.createElement("button");
+    clear.className="btn ghost"; clear.textContent="取消选择";
+    clear.onclick=async()=>{
+      await getJson("/api/nodes/selected",{method:"DELETE"});
+      allNodes=allNodes.map(x=>({...x,selected:false}));
+      renderNodes();
+      await loadSelectedNode();
+    };
+    box.append(title,detail,clear);
+  }catch(e){
+    box.className="empty";box.textContent="当前选择节点读取失败";
+  }
+}
+
+async function loadDataSources(){
+  const box=qs("#sourceInfo");
+  if(!box) return;
+  try{
+    const s=await getJson("/api/data-sources");
+    box.innerHTML="";
+    const entries=[
+      ["候选/源数据",s.candidate],
+      ["真实出口 IP",s.exit_ip],
+      ["实测吞吐",s.throughput],
+      ["住宅/代理判断",s.ip_intel]
+    ];
+    entries.forEach(([label,src])=>{
+      const card=document.createElement("div"); card.className="source-card";
+      const h=document.createElement("strong"); h.textContent=label+" · "+src.name;
+      const p=document.createElement("p"); p.textContent=src.purpose||"";
+      card.append(h,p);
+      const url=src.url||(src.urls&&src.urls[0]);
+      if(url){
+        const a=document.createElement("a"); a.href=url; a.target="_blank"; a.rel="noopener noreferrer"; a.textContent="查看来源";
+        card.appendChild(a);
+      }
+      if(src.fields){
+        const f=document.createElement("small"); f.textContent="使用字段："+src.fields.join(" / "); card.appendChild(f);
+      }
+      if(src.rules){
+        const ul=document.createElement("ul");
+        src.rules.forEach(rule=>{const li=document.createElement("li");li.textContent=rule;ul.appendChild(li);});
+        card.appendChild(ul);
+      }
+      box.appendChild(card);
+    });
+  }catch(e){
+    box.innerHTML='<div class="empty compact">数据源说明读取失败</div>';
   }
 }
 
@@ -249,6 +338,21 @@ async function loadTests(){
       const grid=document.createElement("div"); grid.className="mini-grid";
       [["出口 IP",t.exit_ip||"-"],["延迟",t.latency_ms==null?"-":t.latency_ms+" ms"],["下载",t.download_mbps==null?"-":t.download_mbps+" Mbps"],["上传",t.upload_mbps==null?"-":t.upload_mbps+" Mbps"],["短时成功率",t.stability_percent==null?"-":t.stability_percent+"%"],["住宅/风险",(t.residential_hint||"未知")+" / "+(t.risk||"未知")]].forEach(([a,b])=>{const d=document.createElement("div");const s=document.createElement("span");s.textContent=a;const v=document.createElement("strong");v.textContent=b;d.append(s,v);grid.appendChild(d);});
       card.append(head,grid);
+      const evidence=document.createElement("details"); evidence.className="evidence";
+      const summary=document.createElement("summary"); summary.textContent="查看测试数据来源与住宅判据";
+      evidence.appendChild(summary);
+      const ev=t.evidence||{};
+      const flags=ev.ip_intel_fields||{};
+      const lines=[
+        "候选/源 Ping/源线路速度："+(ev.candidate_source||"VPN Gate"),
+        "真实出口 IP："+(ev.exit_ip_source||"旧记录未保存具体来源"),
+        "下载/上传实测："+(ev.speed_source||"Cloudflare speed.cloudflare.com"),
+        "住宅/代理判断："+(ev.ip_intel_source||"ip-api.com"),
+        "ip-api 判据：hosting="+String(flags.hosting)+" · proxy="+String(flags.proxy)+" · mobile="+String(flags.mobile),
+        "说明：住宅判断只是公开数据库信号；false 不等于已经证明是住宅 IP。"
+      ];
+      lines.forEach(line=>{const p=document.createElement("p");p.textContent=line;evidence.appendChild(p);});
+      card.appendChild(evidence);
       if(t.error){const err=document.createElement("p");err.className="form-message error";err.textContent=t.error;card.appendChild(err);}
       list.appendChild(card);
     });
@@ -329,7 +433,7 @@ async function loadLogs(){
 }
 
 async function loadAll(){
-  await Promise.all([loadMe(),loadStatus(),loadOpenVPN(),loadSettings(),loadLogs(),loadNodes(false),loadTests()]);
+  await Promise.all([loadMe(),loadStatus(),loadOpenVPN(),loadSettings(),loadLogs(),loadNodes(false),loadTests(),loadSelectedNode(),loadDataSources()]);
   pollTestJob();
 }
 

@@ -30,10 +30,11 @@ DATA_DIR = APP_DIR / "data"
 AUTH_FILE = CONFIG_DIR / "auth.json"
 NODE_CACHE_FILE = DATA_DIR / "vpngate_nodes.json"
 TEST_RESULTS_FILE = DATA_DIR / "test_results.json"
+SELECTED_NODE_FILE = DATA_DIR / "selected_node.json"
 
 BIND = os.getenv("GATESOCKS_BIND", "0.0.0.0")
 PORT = int(os.getenv("GATESOCKS_PORT", "19080"))
-VERSION = os.getenv("GATESOCKS_VERSION", "0.4.2-dev")
+VERSION = os.getenv("GATESOCKS_VERSION", "0.4.3-dev")
 SOCKS_START = int(os.getenv("GATESOCKS_SOCKS_START", "18001"))
 SOCKS_END = int(os.getenv("GATESOCKS_SOCKS_END", "18099"))
 TEST_START = int(os.getenv("GATESOCKS_TEST_START", "18100"))
@@ -66,6 +67,37 @@ NODE_LOCK = threading.Lock()
 TEST_LOCK = threading.Lock()
 TEST_JOB = {"running": False, "total": 0, "completed": 0, "current_id": None, "started_at": None, "finished_at": None, "last_error": None}
 IP_META_CACHE: dict[str, dict] = {}
+
+DATA_SOURCES = {
+    "candidate": {
+        "name": "VPN Gate",
+        "url": "https://www.vpngate.net/api/iphone/",
+        "purpose": "候选节点、源 Ping、源线路 Speed/Throughput",
+    },
+    "exit_ip": {
+        "name": "ipify / icanhazip",
+        "urls": ["https://api.ipify.org", "https://icanhazip.com"],
+        "purpose": "OpenVPN 隧道建立后确认真实公网出口 IPv4",
+    },
+    "throughput": {
+        "name": "Cloudflare Speed Test",
+        "url": "https://speed.cloudflare.com/",
+        "download_endpoint": "https://speed.cloudflare.com/__down",
+        "upload_endpoint": "https://speed.cloudflare.com/__up",
+        "purpose": "本 VPS 经临时 VPN 隧道的下载/上传吞吐抽样",
+    },
+    "ip_intel": {
+        "name": "ip-api.com",
+        "url": "https://ip-api.com/docs/api:json",
+        "fields": ["isp", "org", "as", "asname", "mobile", "proxy", "hosting"],
+        "purpose": "ISP/ASN 与住宅/代理/机房倾向辅助判断",
+        "rules": [
+            "hosting=true 或 proxy=true：非住宅/代理倾向；公开库已标记",
+            "mobile=true 且 hosting/proxy=false：移动网络倾向；需复核",
+            "hosting/proxy/mobile 均为 false：仅表示未发现机房/代理/移动标记，不能证明是住宅 IP",
+        ],
+    },
+}
 
 app = FastAPI(title="GateSocks", version=VERSION)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -292,6 +324,32 @@ def refresh_vpngate_nodes() -> dict:
         return payload
 
 
+def read_selected_node() -> dict:
+    try:
+        if SELECTED_NODE_FILE.exists():
+            data = json.loads(SELECTED_NODE_FILE.read_text(encoding="utf-8"))
+            if data.get("node_id"):
+                return data
+    except Exception:
+        pass
+    return {}
+
+
+def classify_ip_meta(meta: dict) -> tuple[str, str, dict]:
+    evidence = {
+        "hosting": bool(meta.get("hosting")) if meta else None,
+        "proxy": bool(meta.get("proxy")) if meta else None,
+        "mobile": bool(meta.get("mobile")) if meta else None,
+    }
+    if not meta:
+        return "未知", "未知", evidence
+    if evidence["hosting"] or evidence["proxy"]:
+        return "非住宅/代理倾向", "公开库已标记", evidence
+    if evidence["mobile"]:
+        return "移动网络倾向", "需复核", evidence
+    return "未发现机房标记（需复核）", "未知", evidence
+
+
 def read_test_results() -> list[dict]:
     try:
         if TEST_RESULTS_FILE.exists():
@@ -313,10 +371,12 @@ def save_test_result(result: dict) -> None:
 
 def nodes_response(payload: dict, message: str | None = None) -> dict:
     latest = {item.get("node_id"): item for item in read_test_results() if item.get("node_id")}
+    selected_id = read_selected_node().get("node_id")
     items = []
     for raw in payload.get("items", []):
         item = public_node(raw)
         test = latest.get(item.get("id"))
+        item["selected"] = item.get("id") == selected_id
         if test:
             item.update({
                 "status": test.get("status", item.get("status")),
@@ -522,6 +582,13 @@ def test_one_node(node: dict) -> dict:
         "upload_mbps": None,
         "stability_percent": 0,
         "error": None,
+        "evidence": {
+            "candidate_source": "VPN Gate",
+            "exit_ip_source": None,
+            "speed_source": "Cloudflare speed.cloudflare.com",
+            "ip_intel_source": "ip-api.com",
+            "ip_intel_fields": {"hosting": None, "proxy": None, "mobile": None},
+        },
     }
 
     try:
@@ -570,6 +637,7 @@ def test_one_node(node: dict) -> dict:
             raise RuntimeError("隧道已建立，但无法通过隧道读取公网出口 IP")
 
         result["exit_ip"] = exit_ip
+        result["evidence"]["exit_ip_source"] = exit_host
 
         try:
             latency_samples = [
@@ -618,18 +686,10 @@ def test_one_node(node: dict) -> dict:
         if meta:
             result["isp"] = meta.get("isp") or meta.get("org")
             result["asn"] = meta.get("as") or meta.get("asname")
-            hosting = bool(meta.get("hosting"))
-            proxy = bool(meta.get("proxy"))
-            mobile = bool(meta.get("mobile"))
-            if hosting or proxy:
-                result["residential_hint"] = "非住宅/代理倾向"
-                result["risk"] = "公开库已标记"
-            elif mobile:
-                result["residential_hint"] = "移动网络倾向"
-                result["risk"] = "需复核"
-            else:
-                result["residential_hint"] = "未发现机房标记（需复核）"
-                result["risk"] = "未知"
+        residential_hint, risk, intel_fields = classify_ip_meta(meta)
+        result["residential_hint"] = residential_hint
+        result["risk"] = risk
+        result["evidence"]["ip_intel_fields"] = intel_fields
 
         result["status"] = "available" if result["stability_percent"] >= 67 else "unavailable"
         return result
@@ -835,6 +895,60 @@ def refresh_nodes():
         return JSONResponse({"detail": f"VPN Gate 拉取失败：{exc}"}, status_code=502)
     except Exception as exc:
         return JSONResponse({"detail": f"节点池刷新失败：{exc}"}, status_code=500)
+
+
+@app.get("/api/data-sources")
+def data_sources():
+    return DATA_SOURCES
+
+
+@app.get("/api/nodes/selected")
+def selected_node():
+    selected = read_selected_node()
+    if not selected.get("node_id"):
+        return {"selected": None}
+    payload = nodes_response(read_node_cache())
+    node = next((item for item in payload["items"] if item.get("id") == selected["node_id"]), None)
+    if node:
+        return {"selected": node, "selected_at": selected.get("selected_at")}
+    return {"selected": selected, "stale": True}
+
+
+@app.post("/api/nodes/select")
+async def select_node(request: Request):
+    try:
+        data = await request.json()
+    except Exception:
+        return JSONResponse({"detail": "invalid request"}, status_code=400)
+
+    node_id = str(data.get("node_id", "")).strip()
+    cache = read_node_cache()
+    node = next((item for item in cache.get("items", []) if str(item.get("id")) == node_id), None)
+    if not node:
+        return JSONResponse({"detail": "节点不存在或已从当前候选池消失"}, status_code=404)
+
+    selected = {
+        "node_id": node_id,
+        "ip": node.get("ip"),
+        "hostname": node.get("hostname"),
+        "country_short": node.get("country_short"),
+        "selected_at": datetime.now(timezone.utc).isoformat(),
+    }
+    atomic_write_json(SELECTED_NODE_FILE, selected)
+    return {
+        "ok": True,
+        "message": "节点已选择；测试结果仅供参考，不限制手动选择。",
+        "selected": selected,
+    }
+
+
+@app.delete("/api/nodes/selected")
+def clear_selected_node():
+    try:
+        SELECTED_NODE_FILE.unlink(missing_ok=True)
+    except Exception:
+        pass
+    return {"ok": True}
 
 
 @app.post("/api/tests/start")

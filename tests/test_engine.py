@@ -38,6 +38,16 @@ CERTDATA
         self.assertIn("AES-128-CBC", joined)
         self.assertNotIn("--hand-window", joined)
 
+    def test_ip_intel_classification(self):
+        hint, risk, evidence = app.classify_ip_meta({"hosting": True, "proxy": False, "mobile": False})
+        self.assertEqual(hint, "非住宅/代理倾向")
+        self.assertEqual(risk, "公开库已标记")
+        self.assertTrue(evidence["hosting"])
+
+        hint, risk, evidence = app.classify_ip_meta({"hosting": False, "proxy": False, "mobile": False})
+        self.assertEqual(hint, "未发现机房标记（需复核）")
+        self.assertEqual(risk, "未知")
+
 
 if __name__ == "__main__":
     unittest.main()

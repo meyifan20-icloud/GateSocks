@@ -6,7 +6,7 @@
   <title>GateSocks</title>
   <link rel="icon" href="/favicon.ico" sizes="any">
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-  <link rel="stylesheet" href="/static/app.css?v=0.4.2-dev">
+  <link rel="stylesheet" href="/static/app.css?v=0.4.3-dev">
 </head>
 <body>
 <div class="app-shell">
@@ -25,7 +25,7 @@
       <button class="nav-item" data-page="settings">设置</button>
     </nav>
     <div class="sidebar-foot">
-      <span id="version">v0.4.2-dev</span>
+      <span id="version">v0.4.3-dev</span>
       <span class="status-dot"></span> Development
     </div>
   </aside>
@@ -69,8 +69,8 @@
       </div>
 
       <article class="panel">
-        <div class="panel-head"><div><h2>最近 SOCKS5</h2><p>生成后将在这里显示本地与外部访问信息</p></div><button class="btn primary" data-jump="nodes">选择节点</button></div>
-        <div class="empty">当前还没有 SOCKS5 实例。先从节点池选择并完成真实连接测试。</div>
+        <div class="panel-head"><div><h2>当前选择节点</h2><p>节点测试结果只作为参考；候选、实测通过或本次实测失败的节点都允许手动选择</p></div><button class="btn primary" data-jump="nodes">选择 / 更换节点</button></div>
+        <div id="selectedNodeCard" class="empty">当前还没有选择节点。</div>
       </article>
     </section>
 
@@ -81,10 +81,10 @@
           <div class="row-actions"><button class="btn ghost" id="refreshNodesBtn">拉取节点</button><button class="btn primary" id="startFilterBtn">开始实测筛选</button></div>
         </div>
         <div class="node-meta" id="nodeSourceMeta">正在读取候选节点…</div>
-        <div class="node-meta" id="testJobMeta">默认实测当前筛选结果中排名靠前的 5 个候选节点。</div>
+        <div class="node-meta" id="testJobMeta">默认实测当前筛选结果中排名靠前的 5 个候选节点。测试状态不限制节点选择。</div>
         <div class="filters">
           <select id="countryFilter"><option value="">全部地区</option></select>
-          <select id="nodeStatusFilter"><option value="">全部状态</option><option value="candidate">候选</option><option value="available">可用</option><option value="testing">测试中</option><option value="unavailable">不可用</option></select>
+          <select id="nodeStatusFilter"><option value="">全部状态</option><option value="candidate">候选</option><option value="available">实测通过</option><option value="testing">测试中</option><option value="unavailable">本次实测失败</option></select>
           <input id="nodeSearch" placeholder="搜索 IP / 主机名 / 国家">
         </div>
         <div class="table-wrap">
@@ -138,6 +138,10 @@
     </section>
 
     <section class="page" id="page-tests">
+      <article class="panel source-panel">
+        <div class="panel-head"><div><h2>测试数据来源与判定规则</h2><p>每项结果都标明数据源；住宅属性属于辅助信号，不是绝对证明</p></div></div>
+        <div id="sourceInfo" class="source-grid"><div class="empty compact">正在读取数据源说明…</div></div>
+      </article>
       <article class="panel">
         <div class="panel-head"><div><h2>测试记录</h2><p>记录延迟、上下行、出口 IP、住宅判断、稳定性与失败原因</p></div><button class="btn ghost" disabled>清理记录</button></div>
         <div id="testsList" class="cards"><div class="empty">暂无真实连接测试记录</div></div>
@@ -188,6 +192,6 @@
     </section>
   </main>
 </div>
-<script src="/static/app.js?v=0.4.2-dev"></script>
+<script src="/static/app.js?v=0.4.3-dev"></script>
 </body>
 </html>

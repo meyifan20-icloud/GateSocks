@@ -2,7 +2,7 @@
 
 GateSocks 是一个面向个人 VPS 的 SOCKS5 出口筛选、验证与管理项目。Web 面板负责节点池、SOCKS5、OpenVPN 隧道、测试记录、日志和设置；OpenVPN 是底层出口隧道，SOCKS5 是主要使用入口。
 
-当前开发版本：`v0.4.2-dev`。
+当前开发版本：`v0.4.3-dev`。
 
 ## Docker image
 
@@ -109,3 +109,12 @@ gatesocks.zhangbao20.ccwu.cc:2096 {
 - 扩展 VPN Gate 配置清洗：拒绝嵌套 config、脚本、代理、daemon/chroot/log/user/group 等与候选测试无关或可能改变进程行为的指令。
 - 住宅/风险只显示公开 IP 数据库的辅助信号，不再把“未发现 hosting/proxy 标记”直接等同于“低风险住宅 IP”。
 - GitHub Actions 增加 Python 编译、单元测试、JavaScript 语法和 Compose 配置预检，避免仅靠镜像能否构建判断代码正确性。
+
+
+## v0.4.3-dev
+
+- 节点池所有节点均允许手动选择：候选、实测通过、本次实测失败都不会被禁用；测试结果仅作参考，最终选择权交给使用者。
+- 当前选择持久化到 `./data/selected_node.json`，仪表盘“选择 / 更换节点”跳转后可直接选择任意候选，仪表盘同步显示当前选择。
+- 测试记录增加数据来源与判定依据：VPN Gate 提供候选、源 Ping/Speed；ipify/icanhazip 确认真实出口；Cloudflare Speed Test 提供隧道吞吐抽样；ip-api.com 提供 ISP/ASN 与 `hosting/proxy/mobile` 信号。
+- 每条测试记录可展开查看实际判据；`hosting=true` 或 `proxy=true` 标记为非住宅/代理倾向，`mobile=true` 标记为移动网络倾向，三者均 false 只代表“未发现相应标记”，不证明一定是住宅 IP。
+- 节点表 ISP 与 ASN 同时展示；“不可用”文案改为“本次实测失败”，避免把一次测试结果解释为永久不可用。
