@@ -11,6 +11,7 @@ const pageMeta = {
 const qs = s => document.querySelector(s);
 const qsa = s => [...document.querySelectorAll(s)];
 let allNodes=[];
+let testSelectedIds=new Set();
 let testPollTimer=null;
 
 function showPage(name){
@@ -38,6 +39,12 @@ if(refreshNodesBtn) refreshNodesBtn.onclick=()=>loadNodes(true);
 
 const startFilterBtn=qs("#startFilterBtn");
 if(startFilterBtn) startFilterBtn.onclick=startRealTests;
+
+const selectAllTestsBtn=qs("#selectAllTestsBtn");
+if(selectAllTestsBtn) selectAllTestsBtn.onclick=selectAllVisibleForTest;
+
+const clearTestSelectionBtn=qs("#clearTestSelectionBtn");
+if(clearTestSelectionBtn) clearTestSelectionBtn.onclick=clearTestSelection;
 
 ["#countryFilter","#nodeStatusFilter","#nodeSearch"].forEach(sel=>{
   const el=qs(sel);
@@ -115,6 +122,32 @@ function fmt(value,suffix=""){
   return value===null||value===undefined||value===""?"-":String(value)+suffix;
 }
 
+function updateTestSelectionUi(){
+  const count=testSelectedIds.size;
+  if(startFilterBtn){
+    startFilterBtn.textContent="开始实测（"+count+"）";
+    if(!testPollTimer) startFilterBtn.disabled=count===0;
+  }
+  const selectedCount=qs("#testSelectedCount");
+  if(selectedCount) selectedCount.textContent=String(count);
+}
+
+function selectAllVisibleForTest(){
+  filteredNodes().forEach(n=>testSelectedIds.add(n.id));
+  renderNodes();
+}
+
+function clearTestSelection(){
+  testSelectedIds.clear();
+  renderNodes();
+}
+
+function toggleTestSelection(nodeId,checked){
+  if(checked) testSelectedIds.add(nodeId);
+  else testSelectedIds.delete(nodeId);
+  updateTestSelectionUi();
+}
+
 function renderNodes(){
   const table=qs("#nodesTable");
   if(!table) return;
@@ -122,35 +155,53 @@ function renderNodes(){
   table.innerHTML="";
   if(!items.length){
     const tr=document.createElement("tr");
-    const td=document.createElement("td"); td.colSpan=11;
+    const td=document.createElement("td"); td.colSpan=14;
     const empty=document.createElement("div"); empty.className="empty compact"; empty.textContent="没有符合当前筛选条件的节点";
-    td.appendChild(empty); tr.appendChild(td); table.appendChild(tr); return;
+    td.appendChild(empty); tr.appendChild(td); table.appendChild(tr);
+    updateTestSelectionUi();
+    return;
   }
   items.forEach(n=>{
     const tr=document.createElement("tr");
     if(n.test_error) tr.title=n.test_error;
+
+    const checkTd=document.createElement("td");
+    checkTd.className="test-check-col";
+    const checkbox=document.createElement("input");
+    checkbox.type="checkbox";
+    checkbox.className="test-checkbox";
+    checkbox.checked=testSelectedIds.has(n.id);
+    checkbox.setAttribute("aria-label","选择 "+(n.ip||n.id)+" 进行实测");
+    checkbox.onchange=()=>toggleTestSelection(n.id,checkbox.checked);
+    checkTd.appendChild(checkbox);
+    tr.appendChild(checkTd);
+
     const values=[
       n.country_short||"-",
       n.exit_ip?(n.ip+" → "+n.exit_ip):(n.ip||"-"),
+      n.source_ping_ms==null?"-":fmt(n.source_ping_ms," ms*"),
+      n.source_speed_mbps==null?"-":fmt(n.source_speed_mbps," Mbps*"),
+      n.latency_ms!=null?fmt(n.latency_ms," ms"):"-",
+      n.download_mbps!=null?fmt(n.download_mbps," Mbps"):"-",
+      n.upload_mbps!=null?fmt(n.upload_mbps," Mbps"):"-",
       [n.isp,n.asn].filter(Boolean).join(" / ")||"待实测",
       n.residential_hint||"待实测",
-      n.latency_ms!=null?fmt(n.latency_ms," ms"):n.source_ping_ms==null?"-":fmt(n.source_ping_ms," ms*"),
-      n.download_mbps!=null?fmt(n.download_mbps," Mbps"):n.source_speed_mbps==null?"-":fmt(n.source_speed_mbps," Mbps*"),
-      n.upload_mbps!=null?fmt(n.upload_mbps," Mbps"):"-",
       n.stability_percent!=null?fmt(n.stability_percent,"%"):"-",
       n.risk||"待实测",
       statusText(n.status)
     ];
     values.forEach(value=>{const td=document.createElement("td"); td.textContent=value; tr.appendChild(td);});
+
     const action=document.createElement("td");
     const button=document.createElement("button");
     button.className=n.selected?"btn primary":"btn ghost";
     button.disabled=false;
-    button.textContent=n.selected?"已选择":"选择";
+    button.textContent=n.selected?"当前使用":"设为使用节点";
     button.onclick=()=>selectNode(n.id);
     if(n.selected) tr.classList.add("selected-row");
     action.appendChild(button); tr.appendChild(action); table.appendChild(tr);
   });
+  updateTestSelectionUi();
 }
 function fillCountryFilter(){
   const select=qs("#countryFilter");
@@ -173,11 +224,13 @@ async function loadNodes(refresh=false){
   try{
     const data=await getJson(refresh?"/api/nodes/refresh":"/api/nodes",refresh?{method:"POST"}:{});
     allNodes=data.items||[];
+    const liveIds=new Set(allNodes.map(n=>n.id));
+    testSelectedIds=new Set([...testSelectedIds].filter(id=>liveIds.has(id)));
     fillCountryFilter();
     renderNodes();
     const count=data.count??allNodes.length;
     const updated=data.updated_at?new Date(data.updated_at).toLocaleString():"尚未缓存";
-    if(meta) meta.textContent="来源："+(data.source||"VPN Gate")+" · 候选 "+count+" 个 · 更新："+updated+" · * 为公益源公布值，未标 * 的字段来自本 VPS 实测";
+    if(meta) meta.textContent="候选源："+(data.source||"VPN Gate")+" · "+count+" 个 · 更新："+updated+" · “源 Ping* / 源线路速度*”仅来自公益项目；“实测延迟 / 实测下载 / 实测上传”仅来自本 VPS，不再相互回退混显";
     if(qs("#statNodes")) qs("#statNodes").textContent=count;
     if(startFilterBtn) startFilterBtn.disabled=!allNodes.length;
   }catch(e){
@@ -222,7 +275,7 @@ async function loadSelectedNode(){
     const parts=[];
     if(n.exit_ip) parts.push("出口 "+n.exit_ip);
     if(n.status) parts.push(statusText(n.status));
-    parts.push("测试结果不限制选择");
+    parts.push("当前使用节点（单选）");
     detail.textContent=parts.join(" · ");
     const clear=document.createElement("button");
     clear.className="btn ghost"; clear.textContent="取消选择";
@@ -276,18 +329,21 @@ async function loadDataSources(){
 }
 
 async function startRealTests(){
-  const visible=filteredNodes().filter(n=>n.status!=="testing");
   const meta=qs("#testJobMeta");
-  if(!visible.length){if(meta) meta.textContent="当前筛选条件下没有可测试节点。";return;}
-  const ids=visible.slice(0,5).map(n=>n.id);
+  const ids=[...testSelectedIds];
+  if(!ids.length){
+    if(meta) meta.textContent="请先用每行最前面的复选框选择要测试的 IP，或点击“全选当前筛选”。";
+    updateTestSelectionUi();
+    return;
+  }
   startFilterBtn.disabled=true; startFilterBtn.textContent="启动中…";
   try{
-    const data=await getJson("/api/tests/start",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({ids,limit:5})});
-    if(meta) meta.textContent="实测已启动："+data.total+" 个节点。单节点会建立临时 OpenVPN 隧道并测试出口、延迟、上下行与稳定性。";
+    const data=await getJson("/api/tests/start",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({ids})});
+    if(meta) meta.textContent="实测已启动："+data.total+" 个手动选择节点。测试勾选与仪表盘当前使用节点互不影响。";
     beginTestPolling();
   }catch(e){
     if(meta) meta.textContent="实测启动失败："+e.message;
-    startFilterBtn.disabled=false; startFilterBtn.textContent="开始实测筛选";
+    updateTestSelectionUi();
   }
 }
 
@@ -305,7 +361,7 @@ async function pollTestJob(){
       if(startFilterBtn){startFilterBtn.disabled=true;startFilterBtn.textContent="实测中 "+job.completed+"/"+job.total;}
       if(meta) meta.textContent="实测进行中："+job.completed+"/"+job.total+(job.current_id?" · 当前 "+job.current_id:"")+"。测试期间 Web 面板流量不会切入临时 VPN。";
     }else{
-      if(startFilterBtn){startFilterBtn.disabled=!allNodes.length;startFilterBtn.textContent="开始实测筛选";}
+      if(startFilterBtn){startFilterBtn.disabled=testSelectedIds.size===0;startFilterBtn.textContent="开始实测（"+testSelectedIds.size+"）";}
       if(job.total){
         if(meta) meta.textContent="最近实测完成："+job.completed+"/"+job.total+(job.last_error?" · 最近失败原因："+job.last_error:"");
         await Promise.all([loadNodes(false),loadTests()]);
@@ -314,7 +370,7 @@ async function pollTestJob(){
     }
   }catch(e){
     if(testPollTimer){clearInterval(testPollTimer);testPollTimer=null;}
-    if(startFilterBtn){startFilterBtn.disabled=false;startFilterBtn.textContent="开始实测筛选";}
+    updateTestSelectionUi();
   }
 }
 

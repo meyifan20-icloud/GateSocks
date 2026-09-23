@@ -34,7 +34,7 @@ SELECTED_NODE_FILE = DATA_DIR / "selected_node.json"
 
 BIND = os.getenv("GATESOCKS_BIND", "0.0.0.0")
 PORT = int(os.getenv("GATESOCKS_PORT", "19080"))
-VERSION = os.getenv("GATESOCKS_VERSION", "0.4.3-dev")
+VERSION = os.getenv("GATESOCKS_VERSION", "0.4.4-dev")
 SOCKS_START = int(os.getenv("GATESOCKS_SOCKS_START", "18001"))
 SOCKS_END = int(os.getenv("GATESOCKS_SOCKS_END", "18099"))
 TEST_START = int(os.getenv("GATESOCKS_TEST_START", "18100"))
@@ -51,6 +51,7 @@ VPNGATE_URL = os.getenv("GATESOCKS_VPNGATE_URL", "https://www.vpngate.net/api/ip
 VPNGATE_TIMEOUT = int(os.getenv("GATESOCKS_VPNGATE_TIMEOUT", "15"))
 VPNGATE_MAX_NODES = int(os.getenv("GATESOCKS_VPNGATE_MAX_NODES", "500"))
 TEST_BATCH_LIMIT = int(os.getenv("GATESOCKS_TEST_BATCH_LIMIT", "5"))
+TEST_MAX_BATCH = int(os.getenv("GATESOCKS_TEST_MAX_BATCH", "200"))
 TEST_CONNECT_TIMEOUT = int(os.getenv("GATESOCKS_TEST_CONNECT_TIMEOUT", "30"))
 TEST_DOWNLOAD_BYTES = int(os.getenv("GATESOCKS_TEST_DOWNLOAD_BYTES", "5000000"))
 TEST_UPLOAD_BYTES = int(os.getenv("GATESOCKS_TEST_UPLOAD_BYTES", "1048576"))
@@ -964,12 +965,19 @@ async def start_tests(request: Request):
 
     cache = read_node_cache()
     by_id = {str(item.get("id")): item for item in cache.get("items", [])}
-    requested = [str(value) for value in data.get("ids", []) if str(value) in by_id]
-    try:
-        limit = max(1, min(int(data.get("limit", TEST_BATCH_LIMIT)), 20))
-    except Exception:
-        limit = TEST_BATCH_LIMIT
-    selected = [by_id[node_id] for node_id in requested[:limit]] if requested else cache.get("items", [])[:limit]
+    requested = []
+    seen = set()
+    for value in data.get("ids", []):
+        node_id = str(value)
+        if node_id in by_id and node_id not in seen:
+            requested.append(node_id)
+            seen.add(node_id)
+
+    if not requested:
+        return JSONResponse({"detail": "请先在节点池勾选要实测的 IP"}, status_code=400)
+
+    selected_ids = requested[:max(1, TEST_MAX_BATCH)]
+    selected = [by_id[node_id] for node_id in selected_ids]
 
     if not selected:
         return JSONResponse({"detail": "没有可测试的候选节点"}, status_code=400)
@@ -987,7 +995,7 @@ async def start_tests(request: Request):
 
     thread = threading.Thread(target=run_test_batch, args=(selected,), daemon=True)
     thread.start()
-    return {"ok": True, "total": len(selected), "message": "实测任务已启动"}
+    return {"ok": True, "total": len(selected), "message": f"实测任务已启动：{len(selected)} 个手动选择节点"}
 
 
 @app.get("/api/tests/status")

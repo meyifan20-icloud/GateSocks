@@ -6,7 +6,7 @@
   <title>GateSocks</title>
   <link rel="icon" href="/favicon.ico" sizes="any">
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-  <link rel="stylesheet" href="/static/app.css?v=0.4.3-dev">
+  <link rel="stylesheet" href="/static/app.css?v=0.4.4-dev">
 </head>
 <body>
 <div class="app-shell">
@@ -25,7 +25,7 @@
       <button class="nav-item" data-page="settings">设置</button>
     </nav>
     <div class="sidebar-foot">
-      <span id="version">v0.4.3-dev</span>
+      <span id="version">v0.4.4-dev</span>
       <span class="status-dot"></span> Development
     </div>
   </aside>
@@ -69,7 +69,7 @@
       </div>
 
       <article class="panel">
-        <div class="panel-head"><div><h2>当前选择节点</h2><p>节点测试结果只作为参考；候选、实测通过或本次实测失败的节点都允许手动选择</p></div><button class="btn primary" data-jump="nodes">选择 / 更换节点</button></div>
+        <div class="panel-head"><div><h2>当前使用节点（单选）</h2><p>这里的“使用节点”与实测勾选完全独立；任何候选、实测通过或本次实测失败的节点都允许手动指定</p></div><button class="btn primary" data-jump="nodes">选择 / 更换使用节点</button></div>
         <div id="selectedNodeCard" class="empty">当前还没有选择节点。</div>
       </article>
     </section>
@@ -77,11 +77,11 @@
     <section class="page" id="page-nodes">
       <article class="panel">
         <div class="panel-head">
-          <div><h2>节点池</h2><p>已接入 VPN Gate 公益候选池；公布的 Ping/Speed 仅作候选排序，后续仍需由本 VPS 真实连接验证</p></div>
-          <div class="row-actions"><button class="btn ghost" id="refreshNodesBtn">拉取节点</button><button class="btn primary" id="startFilterBtn">开始实测筛选</button></div>
+          <div><h2>节点池</h2><p>源数据与本 VPS 实测数据分栏显示；测试勾选（可多选）和“使用节点”（单选）是两套完全独立的选择机制</p></div>
+          <div class="row-actions"><button class="btn ghost" id="refreshNodesBtn">拉取节点</button><button class="btn ghost" id="selectAllTestsBtn">全选当前筛选</button><button class="btn ghost" id="clearTestSelectionBtn">清空测试选择</button><button class="btn primary" id="startFilterBtn">开始实测（0）</button></div>
         </div>
         <div class="node-meta" id="nodeSourceMeta">正在读取候选节点…</div>
-        <div class="node-meta" id="testJobMeta">默认实测当前筛选结果中排名靠前的 5 个候选节点。测试状态不限制节点选择。</div>
+        <div class="node-meta" id="testJobMeta">测试选择：使用每行最前面的复选框，可单独勾选、连续多选或“全选当前筛选”；最后一列“使用节点”是独立的单选机制。</div>
         <div class="filters">
           <select id="countryFilter"><option value="">全部地区</option></select>
           <select id="nodeStatusFilter"><option value="">全部状态</option><option value="candidate">候选</option><option value="available">实测通过</option><option value="testing">测试中</option><option value="unavailable">本次实测失败</option></select>
@@ -89,8 +89,8 @@
         </div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>地区</th><th>节点 IP</th><th>ISP / ASN</th><th>住宅判断</th><th>延迟（实测/源）</th><th>下载（实测/源）</th><th>上传（实测）</th><th>短时成功率</th><th>风险</th><th>状态</th><th>操作</th></tr></thead>
-            <tbody id="nodesTable"><tr><td colspan="11"><div class="empty compact">暂无节点数据</div></td></tr></tbody>
+            <thead><tr><th class="test-check-col">测试</th><th>地区</th><th>节点 IP</th><th>源 Ping*</th><th>源线路速度*</th><th>实测延迟</th><th>实测下载</th><th>实测上传</th><th>ISP / ASN</th><th>住宅判断</th><th>短时成功率</th><th>风险</th><th>测试状态</th><th>使用节点（单选）</th></tr></thead>
+            <tbody id="nodesTable"><tr><td colspan="14"><div class="empty compact">暂无节点数据</div></td></tr></tbody>
           </table>
         </div>
       </article>
@@ -139,7 +139,7 @@
 
     <section class="page" id="page-tests">
       <article class="panel source-panel">
-        <div class="panel-head"><div><h2>测试数据来源与判定规则</h2><p>每项结果都标明数据源；住宅属性属于辅助信号，不是绝对证明</p></div></div>
+        <div class="panel-head"><div><h2>测试数据来源与判定规则</h2><p>VPN Gate 公益源数据、本 VPS 实测数据、出口 IP 与 IP 属性情报分别独立标注；住宅属性属于辅助信号，不是绝对证明</p></div></div>
         <div id="sourceInfo" class="source-grid"><div class="empty compact">正在读取数据源说明…</div></div>
       </article>
       <article class="panel">
@@ -192,6 +192,6 @@
     </section>
   </main>
 </div>
-<script src="/static/app.js?v=0.4.3-dev"></script>
+<script src="/static/app.js?v=0.4.4-dev"></script>
 </body>
 </html>
