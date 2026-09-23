@@ -221,3 +221,13 @@ gatesocks.zhangbao20.ccwu.cc:2096 {
 - 仪表盘和设置页的正式/测试端口池改为从 /api/settings 动态读取，删除前端对 18001–18099、18100–18149 的重复硬编码。
 - 设置 API 不再重复声明 Caddy Docker 网络名称；部署网络仍由 Compose/SUBLINK_NETWORK 负责，应用只报告自身实际运行配置。
 - 增加隧道分类、运行态真源和端口 UI 防回归测试。
+
+
+## v0.4.15-dev
+
+- 新增仓库根目录 `gatesocks-update`，作为 VPS 的固定覆盖升级入口；以后升级不再依赖 VPS 工作目录能否成功 `git pull`。
+- 升级器直接从 GitHub `main` 拉取受控的 `docker-compose.yml` 与 `VERSION`，覆盖旧部署配置，然后拉取 `latest-dev` 并重建容器。
+- `.env`、`data/`、`config/` 明确属于用户/运行数据，升级器不会覆盖；升级前自动备份当前 Compose、VERSION 与 .env 到仅 root 可读的 `.update-backups/`。
+- 覆盖前执行 Compose 校验；启动后最多等待 60 秒，并要求 `/health` 返回版本与远端 VERSION 完全一致才判定升级成功。
+- 解决“镜像已更新但 VPS 仍使用旧 Compose”的部署漂移问题；本地 Git 是否存在 .gitignore 修改不再阻塞日常升级。
+- 安装一次命令别名后，后续只需运行 `gatesocks-update`。

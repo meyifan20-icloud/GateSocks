@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+REPO="meyifan20-icloud/GateSocks"
+BRANCH="${GATESOCKS_BRANCH:-main}"
+INSTALL_DIR="${GATESOCKS_DIR:-/opt/gatesocks}"
+RAW_BASE="https://raw.githubusercontent.com/${REPO}/${BRANCH}"
+API_BASE="https://api.github.com/repos/${REPO}"
+COMPOSE_FILE="${INSTALL_DIR}/docker-compose.yml"
+ENV_FILE="${INSTALL_DIR}/.env"
+STATE_DIRS=(data config)
+
+say(){ printf '[GateSocks Update] %s\n' "$*"; }
+die(){ say "失败：$*"; exit 1; }
+
+[ "$(id -u)" -eq 0 ] || die "请使用 root 运行"
+command -v curl >/dev/null || die "缺少 curl"
+command -v docker >/dev/null || die "缺少 docker"
+docker compose version >/dev/null 2>&1 || die "缺少 docker compose"
+[ -d "$INSTALL_DIR" ] || die "安装目录不存在：$INSTALL_DIR"
+[ -f "$ENV_FILE" ] || die ".env 不存在，拒绝覆盖升级"
+
+cd "$INSTALL_DIR"
+before="$(curl -fsS --max-time 5 http://127.0.0.1:19080/health 2>/dev/null | sed -n 's/.*"version":"\([^"]*\)".*/\1/p' || true)"
+say "当前版本：${before:-未知}"
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+say "拉取 GitHub main 的受控部署文件"
+curl -fsSL "$RAW_BASE/docker-compose.yml" -o "$tmp/docker-compose.yml"
+curl -fsSL "$RAW_BASE/VERSION" -o "$tmp/VERSION"
+target="$(tr -d '\r\n' < "$tmp/VERSION")"
+[ -n "$target" ] || die "远端 VERSION 无效"
+grep -q 'ghcr.io/meyifan20-icloud/gatesocks:latest-dev' "$tmp/docker-compose.yml" || die "远端 Compose 校验失败"
+
+for d in "${STATE_DIRS[@]}"; do
+  mkdir -p "$INSTALL_DIR/$d"
+done
+
+backup="$INSTALL_DIR/.update-backups/$(date -u +%Y%m%dT%H%M%SZ)"
+mkdir -p "$backup"
+[ -f "$COMPOSE_FILE" ] && cp -a "$COMPOSE_FILE" "$backup/docker-compose.yml"
+[ -f "$INSTALL_DIR/VERSION" ] && cp -a "$INSTALL_DIR/VERSION" "$backup/VERSION"
+cp -a "$ENV_FILE" "$backup/.env"
+chmod 700 "$INSTALL_DIR/.update-backups" "$backup"
+chmod 600 "$backup/.env"
+
+install -m 0644 "$tmp/docker-compose.yml" "$COMPOSE_FILE"
+install -m 0644 "$tmp/VERSION" "$INSTALL_DIR/VERSION"
+
+say "目标版本：$target"
+say "校验 Compose（保留 .env / data / config）"
+docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" config >/dev/null || {
+  [ -f "$backup/docker-compose.yml" ] && cp -a "$backup/docker-compose.yml" "$COMPOSE_FILE"
+  [ -f "$backup/VERSION" ] && cp -a "$backup/VERSION" "$INSTALL_DIR/VERSION"
+  die "Compose 校验失败，已恢复部署文件"
+}
+
+say "拉取最新镜像并重建"
+docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" pull
+docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --force-recreate --remove-orphans
+
+say "等待健康检查"
+ok=0
+for _ in $(seq 1 30); do
+  if health="$(curl -fsS --max-time 3 http://127.0.0.1:19080/health 2>/dev/null)"; then
+    actual="$(printf '%s' "$health" | sed -n 's/.*"version":"\([^"]*\)".*/\1/p')"
+    if [ "$actual" = "$target" ]; then ok=1; break; fi
+  fi
+  sleep 2
+done
+
+if [ "$ok" -ne 1 ]; then
+  say "健康检查或版本校验失败；备份位于 $backup"
+  docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" ps || true
+  exit 1
+fi
+
+say "升级成功：${before:-未知} -> $actual"
+say "部署配置已覆盖为仓库 main；.env、data、config 未覆盖"
