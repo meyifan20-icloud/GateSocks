@@ -6,7 +6,7 @@
   <title>GateSocks</title>
   <link rel="icon" href="/favicon.ico" sizes="any">
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-  <link rel="stylesheet" href="/static/app.css?v=0.4.4-dev">
+  <link rel="stylesheet" href="/static/app.css?v=0.4.5-dev">
 </head>
 <body>
 <div class="app-shell">
@@ -25,7 +25,7 @@
       <button class="nav-item" data-page="settings">设置</button>
     </nav>
     <div class="sidebar-foot">
-      <span id="version">v0.4.4-dev</span>
+      <span id="version">v0.4.5-dev</span>
       <span class="status-dot"></span> Development
     </div>
   </aside>
@@ -69,7 +69,7 @@
       </div>
 
       <article class="panel">
-        <div class="panel-head"><div><h2>当前使用节点（单选）</h2><p>这里的“使用节点”与实测勾选完全独立；任何候选、实测通过或本次实测失败的节点都允许手动指定</p></div><button class="btn primary" data-jump="nodes">选择 / 更换使用节点</button></div>
+        <div class="panel-head"><div><h2>当前使用节点（单选）</h2><p>这里的“使用节点”与实测勾选完全独立；在节点池直接点击 IP 信息即可设为当前使用节点（单选）</p></div><button class="btn primary" data-jump="nodes">选择 / 更换使用节点</button></div>
         <div id="selectedNodeCard" class="empty">当前还没有选择节点。</div>
       </article>
     </section>
@@ -81,7 +81,7 @@
           <div class="row-actions"><button class="btn ghost" id="refreshNodesBtn">拉取节点</button><button class="btn ghost" id="selectAllTestsBtn">全选当前筛选</button><button class="btn ghost" id="clearTestSelectionBtn">清空测试选择</button><button class="btn primary" id="startFilterBtn">开始实测（0）</button></div>
         </div>
         <div class="node-meta" id="nodeSourceMeta">正在读取候选节点…</div>
-        <div class="node-meta" id="testJobMeta">测试选择：使用每行最前面的复选框，可单独勾选、连续多选或“全选当前筛选”；最后一列“使用节点”是独立的单选机制。</div>
+        <div class="node-meta" id="testJobMeta">测试选择：使用每行最前面的复选框，可单独勾选、连续多选或“全选当前筛选”；仪表盘使用节点通过点击“节点 IP”设置，两套选择互不影响。</div>
         <div class="filters">
           <select id="countryFilter"><option value="">全部地区</option></select>
           <select id="nodeStatusFilter"><option value="">全部状态</option><option value="candidate">候选</option><option value="available">实测通过</option><option value="testing">测试中</option><option value="unavailable">本次实测失败</option></select>
@@ -89,8 +89,8 @@
         </div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th class="test-check-col">测试</th><th>地区</th><th>节点 IP</th><th>源 Ping*</th><th>源线路速度*</th><th>实测延迟</th><th>实测下载</th><th>实测上传</th><th>ISP / ASN</th><th>住宅判断</th><th>短时成功率</th><th>风险</th><th>测试状态</th><th>使用节点（单选）</th></tr></thead>
-            <tbody id="nodesTable"><tr><td colspan="14"><div class="empty compact">暂无节点数据</div></td></tr></tbody>
+            <thead><tr><th class="test-check-col">测试</th><th>地区</th><th>节点 IP（点击设为使用节点）</th><th>源 Ping*</th><th>源线路速度*</th><th>实测延迟</th><th>实测下载</th><th>实测上传</th><th>ISP / ASN</th><th>住宅判断</th><th>短时成功率</th><th>风险</th><th>测试状态</th></tr></thead>
+            <tbody id="nodesTable"><tr><td colspan="13"><div class="empty compact">暂无节点数据</div></td></tr></tbody>
           </table>
         </div>
       </article>
@@ -118,11 +118,12 @@
             </div>
             <div class="access-box">
               <h3>外部访问</h3>
-              <div class="copy-row"><span>地址</span><code>VPS 公网 IP</code><button disabled>复制</button></div>
-              <div class="copy-row"><span>端口</span><code>18001</code><button disabled>复制</button></div>
-              <div class="copy-row"><span>用户名</span><code>等待生成</code><button disabled>复制</button></div>
-              <div class="copy-row"><span>密码</span><code>等待生成</code><button disabled>复制</button></div>
-              <div class="copy-row wide"><span>完整地址</span><code>socks5://...</code><button disabled>复制</button></div>
+              <p class="access-note">正式实例中每条文本信息均提供同尺寸“复制 / 二维码”按钮；“完整地址”二维码可供移动代理客户端扫码添加。</p>
+              <div class="copy-row qr-ready"><span>地址</span><code>VPS 公网 IP</code><button disabled>复制</button><button disabled>二维码</button></div>
+              <div class="copy-row qr-ready"><span>端口</span><code>18001</code><button disabled>复制</button><button disabled>二维码</button></div>
+              <div class="copy-row qr-ready"><span>用户名</span><code>等待生成</code><button disabled>复制</button><button disabled>二维码</button></div>
+              <div class="copy-row qr-ready"><span>密码</span><code>等待生成</code><button disabled>复制</button><button disabled>二维码</button></div>
+              <div class="copy-row wide qr-ready"><span>完整地址</span><code>socks5://...</code><button disabled>复制</button><button disabled>二维码</button></div>
             </div>
           </div>
         </div>
@@ -192,6 +193,16 @@
     </section>
   </main>
 </div>
-<script src="/static/app.js?v=0.4.4-dev"></script>
+<div class="qr-modal" id="qrModal" hidden>
+  <div class="qr-dialog" role="dialog" aria-modal="true" aria-labelledby="qrTitle">
+    <div class="qr-head">
+      <div><strong id="qrTitle">二维码</strong><span id="qrSubtitle">扫码读取代理信息</span></div>
+      <button class="btn ghost" id="qrCloseBtn">关闭</button>
+    </div>
+    <div class="qr-image-wrap"><img id="qrImage" alt="代理信息二维码"></div>
+    <code id="qrText" class="qr-text"></code>
+  </div>
+</div>
+<script src="/static/app.js?v=0.4.5-dev"></script>
 </body>
 </html>

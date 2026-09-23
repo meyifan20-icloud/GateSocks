@@ -19,8 +19,10 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
+import qrcode
+import qrcode.image.svg
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 APP_DIR = Path(__file__).resolve().parent
@@ -34,7 +36,7 @@ SELECTED_NODE_FILE = DATA_DIR / "selected_node.json"
 
 BIND = os.getenv("GATESOCKS_BIND", "0.0.0.0")
 PORT = int(os.getenv("GATESOCKS_PORT", "19080"))
-VERSION = os.getenv("GATESOCKS_VERSION", "0.4.4-dev")
+VERSION = os.getenv("GATESOCKS_VERSION", "0.4.5-dev")
 SOCKS_START = int(os.getenv("GATESOCKS_SOCKS_START", "18001"))
 SOCKS_END = int(os.getenv("GATESOCKS_SOCKS_END", "18099"))
 TEST_START = int(os.getenv("GATESOCKS_TEST_START", "18100"))
@@ -103,6 +105,20 @@ DATA_SOURCES = {
 app = FastAPI(title="GateSocks", version=VERSION)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
+
+def build_qr_svg(text: str) -> bytes:
+    value = str(text)
+    if not value or len(value) > 4096:
+        raise ValueError("QR text must be between 1 and 4096 characters")
+    image = qrcode.make(
+        value,
+        image_factory=qrcode.image.svg.SvgPathImage,
+        box_size=8,
+        border=4,
+    )
+    stream = io.BytesIO()
+    image.save(stream)
+    return stream.getvalue()
 
 def run(cmd: list[str], timeout: int = 4) -> str:
     try:
@@ -1004,9 +1020,33 @@ def test_status():
         return dict(TEST_JOB)
 
 
+@app.post("/api/qr")
+async def qr_code(request: Request):
+    try:
+        data = await request.json()
+    except Exception:
+        return JSONResponse({"detail": "invalid request"}, status_code=400)
+
+    text = str(data.get("text", ""))
+    label = str(data.get("label", "")).strip()
+    try:
+        svg = build_qr_svg(text)
+    except ValueError as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=400)
+
+    return Response(
+        content=svg,
+        media_type="image/svg+xml",
+        headers={
+            "Cache-Control": "no-store, max-age=0",
+            "Pragma": "no-cache",
+            "X-QR-Label": label[:120],
+        },
+    )
+
 @app.get("/api/socks")
 def socks():
-    return {"items": [], "port_pool": {"start": SOCKS_START, "end": SOCKS_END}, "message": "尚未生成 SOCKS5 实例。"}
+    return {"items": [], "port_pool": {"start": SOCKS_START, "end": SOCKS_END}, "qr_supported": True, "message": "尚未生成 SOCKS5 实例。"}
 
 
 @app.get("/api/openvpn")

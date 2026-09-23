@@ -54,6 +54,52 @@ if(clearTestSelectionBtn) clearTestSelectionBtn.onclick=clearTestSelection;
 const saveAuthBtn=qs("#saveAuthBtn");
 if(saveAuthBtn) saveAuthBtn.onclick=saveAuthSettings;
 
+let qrObjectUrl=null;
+const qrModal=qs("#qrModal");
+const qrCloseBtn=qs("#qrCloseBtn");
+if(qrCloseBtn) qrCloseBtn.onclick=closeQr;
+if(qrModal) qrModal.addEventListener("click",e=>{if(e.target===qrModal) closeQr();});
+document.addEventListener("keydown",e=>{if(e.key==="Escape" && qrModal && !qrModal.hidden) closeQr();});
+
+function closeQr(){
+  if(qrObjectUrl){URL.revokeObjectURL(qrObjectUrl);qrObjectUrl=null;}
+  if(qrModal) qrModal.hidden=true;
+  const img=qs("#qrImage"); if(img) img.removeAttribute("src");
+}
+
+async function showQr(text,label="代理信息"){
+  if(!text) return;
+  const r=await fetch("/api/qr",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text,label})});
+  if(r.status===401){location.replace("/login");return;}
+  if(!r.ok){const data=await r.json().catch(()=>({}));throw new Error(data.detail||"二维码生成失败");}
+  const blob=await r.blob();
+  if(qrObjectUrl) URL.revokeObjectURL(qrObjectUrl);
+  qrObjectUrl=URL.createObjectURL(blob);
+  qs("#qrImage").src=qrObjectUrl;
+  qs("#qrTitle").textContent=label;
+  qs("#qrSubtitle").textContent=label==="完整地址"?"可供支持 SOCKS5 URI 的移动代理客户端扫码添加":"扫码读取该字段文本";
+  qs("#qrText").textContent=text;
+  qrModal.hidden=false;
+}
+
+async function copyText(text,button){
+  try{
+    await navigator.clipboard.writeText(text);
+    if(button){const old=button.textContent;button.textContent="已复制";setTimeout(()=>button.textContent=old,1200);}
+  }catch(e){}
+}
+
+function appendAccessRow(container,label,value,enableQr=true){
+  const row=document.createElement("div"); row.className="copy-row"+(enableQr?" qr-ready":"");
+  const l=document.createElement("span"); l.textContent=label;
+  const code=document.createElement("code"); code.textContent=value||"-";
+  const copy=document.createElement("button"); copy.textContent="复制"; copy.disabled=!value; copy.onclick=()=>copyText(value,copy);
+  row.append(l,code,copy);
+  if(enableQr){const qr=document.createElement("button");qr.textContent="二维码";qr.disabled=!value;qr.onclick=()=>showQr(value,label).catch(()=>{});row.appendChild(qr);}
+  container.appendChild(row);
+  return row;
+}
+
 function kv(label,value){
   const box=document.createElement("div"); box.className="kv";
   const s=document.createElement("span"); s.textContent=label;
@@ -155,30 +201,25 @@ function renderNodes(){
   table.innerHTML="";
   if(!items.length){
     const tr=document.createElement("tr");
-    const td=document.createElement("td"); td.colSpan=14;
+    const td=document.createElement("td"); td.colSpan=13;
     const empty=document.createElement("div"); empty.className="empty compact"; empty.textContent="没有符合当前筛选条件的节点";
-    td.appendChild(empty); tr.appendChild(td); table.appendChild(tr);
-    updateTestSelectionUi();
-    return;
+    td.appendChild(empty); tr.appendChild(td); table.appendChild(tr); updateTestSelectionUi(); return;
   }
   items.forEach(n=>{
     const tr=document.createElement("tr");
     if(n.test_error) tr.title=n.test_error;
-
-    const checkTd=document.createElement("td");
-    checkTd.className="test-check-col";
-    const checkbox=document.createElement("input");
-    checkbox.type="checkbox";
-    checkbox.className="test-checkbox";
-    checkbox.checked=testSelectedIds.has(n.id);
-    checkbox.setAttribute("aria-label","选择 "+(n.ip||n.id)+" 进行实测");
-    checkbox.onchange=()=>toggleTestSelection(n.id,checkbox.checked);
-    checkTd.appendChild(checkbox);
-    tr.appendChild(checkTd);
-
+    const checkTd=document.createElement("td"); checkTd.className="test-check-col";
+    const checkbox=document.createElement("input"); checkbox.type="checkbox"; checkbox.className="test-checkbox"; checkbox.checked=testSelectedIds.has(n.id);
+    checkbox.setAttribute("aria-label","选择 "+(n.ip||n.id)+" 进行实测"); checkbox.onchange=()=>toggleTestSelection(n.id,checkbox.checked);
+    checkTd.appendChild(checkbox); tr.appendChild(checkTd);
+    const countryTd=document.createElement("td"); countryTd.textContent=n.country_short||"-"; tr.appendChild(countryTd);
+    const ipTd=document.createElement("td");
+    const ipButton=document.createElement("button"); ipButton.type="button"; ipButton.className="ip-select-btn"+(n.selected?" selected":"");
+    ipButton.title="点击设为仪表盘当前使用节点（单选）"; ipButton.textContent=n.exit_ip?(n.ip+" → "+n.exit_ip):(n.ip||"-"); ipButton.onclick=()=>selectNode(n.id);
+    ipTd.appendChild(ipButton);
+    if(n.selected){const badge=document.createElement("span");badge.className="ip-selected-badge";badge.textContent="当前使用";ipTd.appendChild(badge);tr.classList.add("selected-row");}
+    tr.appendChild(ipTd);
     const values=[
-      n.country_short||"-",
-      n.exit_ip?(n.ip+" → "+n.exit_ip):(n.ip||"-"),
       n.source_ping_ms==null?"-":fmt(n.source_ping_ms," ms*"),
       n.source_speed_mbps==null?"-":fmt(n.source_speed_mbps," Mbps*"),
       n.latency_ms!=null?fmt(n.latency_ms," ms"):"-",
@@ -190,16 +231,8 @@ function renderNodes(){
       n.risk||"待实测",
       statusText(n.status)
     ];
-    values.forEach(value=>{const td=document.createElement("td"); td.textContent=value; tr.appendChild(td);});
-
-    const action=document.createElement("td");
-    const button=document.createElement("button");
-    button.className=n.selected?"btn primary":"btn ghost";
-    button.disabled=false;
-    button.textContent=n.selected?"当前使用":"设为使用节点";
-    button.onclick=()=>selectNode(n.id);
-    if(n.selected) tr.classList.add("selected-row");
-    action.appendChild(button); tr.appendChild(action); table.appendChild(tr);
+    values.forEach(value=>{const td=document.createElement("td");td.textContent=value;tr.appendChild(td);});
+    table.appendChild(tr);
   });
   updateTestSelectionUi();
 }
@@ -232,7 +265,7 @@ async function loadNodes(refresh=false){
     const updated=data.updated_at?new Date(data.updated_at).toLocaleString():"尚未缓存";
     if(meta) meta.textContent="候选源："+(data.source||"VPN Gate")+" · "+count+" 个 · 更新："+updated+" · “源 Ping* / 源线路速度*”仅来自公益项目；“实测延迟 / 实测下载 / 实测上传”仅来自本 VPS，不再相互回退混显";
     if(qs("#statNodes")) qs("#statNodes").textContent=count;
-    if(startFilterBtn) startFilterBtn.disabled=!allNodes.length;
+    updateTestSelectionUi();
   }catch(e){
     allNodes=[];
     renderNodes();
@@ -414,6 +447,39 @@ async function loadTests(){
     });
   }catch(e){list.innerHTML="<div class=\"empty\">测试记录读取失败</div>";}
 }
+async function loadSocks(){
+  const list=qs("#socksList");
+  if(!list) return;
+  try{
+    const data=await getJson("/api/socks");
+    const items=data.items||[];
+    if(!items.length){
+      list.innerHTML='<div class="empty">尚未生成 SOCKS5。正式实例生成后，外部访问每条文本会同时提供“复制”和“二维码”；完整地址二维码可直接用于支持 SOCKS5 URI 的移动代理客户端扫码添加。</div>';
+      return;
+    }
+    list.innerHTML="";
+    items.forEach((item,index)=>{
+      const card=document.createElement("div"); card.className="proxy-card";
+      const head=document.createElement("div"); head.className="proxy-head";
+      const left=document.createElement("div");
+      const title=document.createElement("strong"); title.textContent=item.name||("SOCKS5-"+(index+1));
+      const sub=document.createElement("span"); sub.textContent=item.exit_ip?("出口 "+item.exit_ip):"SOCKS5 外部访问";
+      left.append(title,sub);
+      const state=document.createElement("span"); state.className="pill ok"; state.textContent=item.status||"在线";
+      head.append(left,state); card.appendChild(head);
+      const access=document.createElement("div"); access.className="access-box";
+      const h=document.createElement("h3"); h.textContent="外部访问";
+      const note=document.createElement("p"); note.className="access-note"; note.textContent="完整地址二维码可供支持 SOCKS5 URI 的移动代理客户端扫码添加。";
+      access.append(h,note);
+      appendAccessRow(access,"地址",item.host||item.address||"",true);
+      appendAccessRow(access,"端口",item.port?String(item.port):"",true);
+      appendAccessRow(access,"用户名",item.username||"",true);
+      appendAccessRow(access,"密码",item.password||"",true);
+      appendAccessRow(access,"完整地址",item.url||item.uri||"",true);
+      card.appendChild(access); list.appendChild(card);
+    });
+  }catch(e){list.innerHTML='<div class="empty">SOCKS5 信息读取失败</div>';}
+}
 async function loadOpenVPN(){
   try{
     const o=await getJson("/api/openvpn");
@@ -489,7 +555,7 @@ async function loadLogs(){
 }
 
 async function loadAll(){
-  await Promise.all([loadMe(),loadStatus(),loadOpenVPN(),loadSettings(),loadLogs(),loadNodes(false),loadTests(),loadSelectedNode(),loadDataSources()]);
+  await Promise.all([loadMe(),loadStatus(),loadOpenVPN(),loadSocks(),loadSettings(),loadLogs(),loadNodes(false),loadTests(),loadSelectedNode(),loadDataSources()]);
   pollTestJob();
 }
 

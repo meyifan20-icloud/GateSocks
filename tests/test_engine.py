@@ -48,6 +48,12 @@ CERTDATA
         self.assertEqual(hint, "未发现机房标记（需复核）")
         self.assertEqual(risk, "未知")
 
+    def test_qr_svg_generation(self):
+        svg = app.build_qr_svg("socks5://user:pass@example.com:18001")
+        self.assertIn(b"<svg", svg)
+        with self.assertRaises(ValueError):
+            app.build_qr_svg("")
+
 
 if __name__ == "__main__":
     unittest.main()
