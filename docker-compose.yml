@@ -5,6 +5,7 @@ services:
     restart: unless-stopped
     cap_add:
       - NET_ADMIN
+      - NET_RAW
     devices:
       - /dev/net/tun:/dev/net/tun
     ports:
@@ -15,7 +16,7 @@ services:
     environment:
       GATESOCKS_BIND: 0.0.0.0
       GATESOCKS_PORT: 19080
-      GATESOCKS_VERSION: 0.4.11-dev
+      GATESOCKS_VERSION: 0.4.12-dev
       GATESOCKS_CADDY_NETWORK: ${SUBLINK_NETWORK:-sublink-worker_default}
       GATESOCKS_ADMIN_USER: ${GATESOCKS_ADMIN_USER:-admin}
       GATESOCKS_ADMIN_PASS: ${GATESOCKS_ADMIN_PASS:?set GATESOCKS_ADMIN_PASS}

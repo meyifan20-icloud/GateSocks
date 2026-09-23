@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 import argparse
+import os
+import sys
 import select
 import socket
 import socketserver
@@ -136,18 +138,33 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--bind", default="0.0.0.0")
     parser.add_argument("--port", type=int, required=True)
-    parser.add_argument("--username", required=True)
-    parser.add_argument("--password", required=True)
     parser.add_argument("--interface", required=True)
+    parser.add_argument("--username", default=None)
+    parser.add_argument("--password", default=None)
     args = parser.parse_args()
-    with ThreadingSocksServer(
-        (args.bind, args.port),
-        SocksHandler,
-        args.username,
-        args.password,
-        args.interface,
-    ) as server:
-        server.serve_forever(poll_interval=0.5)
+
+    username = args.username if args.username is not None else os.getenv("GATESOCKS_PROXY_USERNAME", "")
+    password = args.password if args.password is not None else os.getenv("GATESOCKS_PROXY_PASSWORD", "")
+    if not username or not password:
+        raise RuntimeError("SOCKS5 credentials are missing")
+
+    try:
+        with ThreadingSocksServer(
+            (args.bind, args.port),
+            SocksHandler,
+            username,
+            password,
+            args.interface,
+        ) as server:
+            print(
+                f"GateSocks SOCKS5 listening on {args.bind}:{args.port} via {args.interface}",
+                file=sys.stderr,
+                flush=True,
+            )
+            server.serve_forever(poll_interval=0.5)
+    except Exception as exc:
+        print(f"SOCKS5 startup failed: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+        raise
 
 
 if __name__ == "__main__":

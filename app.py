@@ -41,7 +41,7 @@ SOCKS_SERVER_SCRIPT = APP_DIR / "socks_server.py"
 
 BIND = os.getenv("GATESOCKS_BIND", "0.0.0.0")
 PORT = int(os.getenv("GATESOCKS_PORT", "19080"))
-VERSION = os.getenv("GATESOCKS_VERSION", "0.4.11-dev")
+VERSION = os.getenv("GATESOCKS_VERSION", "0.4.12-dev")
 SOCKS_START = int(os.getenv("GATESOCKS_SOCKS_START", "18001"))
 SOCKS_END = int(os.getenv("GATESOCKS_SOCKS_END", "18099"))
 TEST_START = int(os.getenv("GATESOCKS_TEST_START", "18100"))
@@ -1045,17 +1045,31 @@ def wait_openvpn_ready(proc: subprocess.Popen, log_path: Path, tun_name: str) ->
     raise RuntimeError("OpenVPN 未建立长期隧道：" + compact_tail)
 
 
-def wait_socks_listener(proc: subprocess.Popen, port: int) -> None:
+def wait_socks_listener(proc: subprocess.Popen, port: int, log_path: Path | None = None) -> None:
     deadline = time.time() + 5
     while time.time() < deadline:
-        if proc.poll() is not None:
-            raise RuntimeError("SOCKS5 进程启动后立即退出")
+        code = proc.poll()
+        if code is not None:
+            tail = ""
+            if log_path:
+                try:
+                    tail = log_path.read_text(encoding="utf-8", errors="replace")[-1200:]
+                except Exception:
+                    pass
+            detail = tail.replace("\n", " ").strip()[-800:] or "无 SOCKS5 子进程日志"
+            raise RuntimeError(f"SOCKS5 进程启动后立即退出（exit={code}）：{detail}")
         try:
             with socket.create_connection(("127.0.0.1", int(port)), timeout=0.4):
                 return
         except OSError:
             time.sleep(0.2)
-    raise RuntimeError("SOCKS5 监听端口未就绪")
+    tail = ""
+    if log_path:
+        try:
+            tail = log_path.read_text(encoding="utf-8", errors="replace")[-800:].replace("\n", " ").strip()
+        except Exception:
+            pass
+    raise RuntimeError("SOCKS5 监听端口未就绪" + (f"：{tail}" if tail else ""))
 
 
 def proxy_curl(instance: dict, args: list[str], timeout: int = 18, input_bytes: bytes | None = None) -> str:
@@ -1182,20 +1196,24 @@ def start_socks_instance(instance_id: str) -> dict:
             socks_handle = socks_log.open("a", encoding="utf-8")
             socks_handle.write(f"\n=== GateSocks start {datetime.now(timezone.utc).isoformat()} ===\n")
             socks_handle.flush()
+            socks_env = os.environ.copy()
+            socks_env["GATESOCKS_PROXY_USERNAME"] = str(instance["username"])
+            socks_env["GATESOCKS_PROXY_PASSWORD"] = str(instance["password"])
             socks_proc = subprocess.Popen(
                 [
                     "python", str(SOCKS_SERVER_SCRIPT),
                     "--bind", "0.0.0.0",
                     "--port", str(instance["port"]),
-                    "--username", str(instance["username"]),
-                    "--password", str(instance["password"]),
                     "--interface", str(instance["tun_name"]),
                 ],
-                stdout=socks_handle, stderr=subprocess.STDOUT, text=True,
+                stdout=socks_handle,
+                stderr=subprocess.STDOUT,
+                text=True,
+                env=socks_env,
             )
             SOCKS_RUNTIME[instance_id]["socks"] = socks_proc
             SOCKS_RUNTIME[instance_id]["socks_log_handle"] = socks_handle
-            wait_socks_listener(socks_proc, int(instance["port"]))
+            wait_socks_listener(socks_proc, int(instance["port"]), socks_log)
             probe = probe_socks_instance(instance, full=False)
             instance["exit_ip"] = probe["exit_ip"]
             meta = ip_metadata(probe["exit_ip"])

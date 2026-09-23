@@ -129,6 +129,11 @@ remote 203.0.113.10 443
         self.assertIn("--pull-filter ignore ifconfig-ipv6", joined)
         self.assertIn("--route-nopull", joined)
 
+    def test_socks_credentials_can_come_from_environment(self):
+        self.assertIn("GATESOCKS_PROXY_USERNAME", Path("socks_server.py").read_text(encoding="utf-8"))
+        self.assertIn("GATESOCKS_PROXY_PASSWORD", Path("socks_server.py").read_text(encoding="utf-8"))
+
+
 
 if __name__ == "__main__":
     unittest.main()

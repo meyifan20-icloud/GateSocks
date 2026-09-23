@@ -2,7 +2,7 @@
 
 GateSocks 是一个面向个人 VPS 的 SOCKS5 出口筛选、验证与管理项目。Web 面板负责节点池、SOCKS5、OpenVPN 隧道、测试记录、日志和设置；OpenVPN 是底层出口隧道，SOCKS5 是主要使用入口。
 
-当前开发版本：`v0.4.11-dev`。
+当前开发版本：`v0.4.12-dev`。
 
 ## Docker image
 
@@ -191,3 +191,12 @@ gatesocks.zhangbao20.ccwu.cc:2096 {
 - 每个实例的策略路由同步改为 `ip rule oif <tun> lookup <table>` + 独立默认路由表，与绑定设备的 socket 配合，不再依赖 fwmark。
 - 临时节点实测和正式 SOCKS5 长期隧道共用同一套 OpenVPN 启动/认证回退逻辑；实测记录额外记录实际采用的 OpenVPN 认证模式。
 - 现有实例无需删除重建；升级后“重新连接”即可迁移到 SO_BINDTODEVICE 与新 OpenVPN 连接逻辑。
+
+
+## v0.4.12-dev
+
+- 修复 SOCKS5 子进程“启动后立即退出”时缺少根因信息的问题：面板现在会带回子进程 exit code 与 socks.log 尾部错误，不再只显示笼统提示。
+- SOCKS5 用户名/密码不再作为命令行参数传给子进程，改由受控环境变量传递；避免随机密码以 `-` 开头时被 argparse 误识别为参数，也避免凭据出现在进程命令行。
+- Compose 显式增加 `NET_RAW` capability，与 `NET_ADMIN` 一起满足 Linux `SO_BINDTODEVICE` 出站绑定所需权限。
+- SOCKS5 子进程启动时会写入明确的监听地址、端口和 TUN；启动异常会把异常类型与原始错误写入实例 socks.log。
+- 现有实例无需删除，升级后直接“重新连接”即可使用新启动逻辑。
