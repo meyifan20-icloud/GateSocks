@@ -22,3 +22,5 @@ nav{display:grid;gap:6px}.nav-item{border:0;background:transparent;color:#aeb9c7
 .auth-card h1{font-size:22px;margin:0}.auth-card>p{color:var(--muted);font-size:13px;margin:7px 0 22px}.auth-card .field input{background:#fff}.auth-submit{width:100%;margin-top:6px}.auth-error{min-height:20px;color:#b91c1c;font-size:12px;margin:4px 0}.auth-foot{display:block;text-align:center;color:#94a3b8;margin-top:22px}
 
 .node-meta{margin:-4px 0 14px;color:var(--muted);font-size:11px}.form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 14px}.form-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:4px}.form-message{font-size:12px;color:var(--muted)}.form-message.ok{color:var(--ok)}.form-message.error{color:#b91c1c}@media(max-width:760px){.form-grid{grid-template-columns:1fr}.top-actions{flex-wrap:wrap;justify-content:flex-end}}
+
+#testsList .mini-grid{grid-template-columns:repeat(3,minmax(0,1fr));margin-bottom:0}#testJobMeta{min-height:16px}@media(max-width:760px){#testsList .mini-grid{grid-template-columns:1fr 1fr}}@media(max-width:460px){#testsList .mini-grid{grid-template-columns:1fr}}

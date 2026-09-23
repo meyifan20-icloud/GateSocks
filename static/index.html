@@ -6,7 +6,7 @@
   <title>GateSocks</title>
   <link rel="icon" href="/favicon.ico" sizes="any">
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-  <link rel="stylesheet" href="/static/app.css?v=0.4.0-dev">
+  <link rel="stylesheet" href="/static/app.css?v=0.4.1-dev">
 </head>
 <body>
 <div class="app-shell">
@@ -25,7 +25,7 @@
       <button class="nav-item" data-page="settings">设置</button>
     </nav>
     <div class="sidebar-foot">
-      <span id="version">v0.4.0-dev</span>
+      <span id="version">v0.4.1-dev</span>
       <span class="status-dot"></span> Development
     </div>
   </aside>
@@ -78,9 +78,10 @@
       <article class="panel">
         <div class="panel-head">
           <div><h2>节点池</h2><p>已接入 VPN Gate 公益候选池；公布的 Ping/Speed 仅作候选排序，后续仍需由本 VPS 真实连接验证</p></div>
-          <div class="row-actions"><button class="btn ghost" id="refreshNodesBtn">拉取节点</button><button class="btn primary" id="startFilterBtn" disabled title="OpenVPN 实连筛选将在下一步接入">开始实测筛选</button></div>
+          <div class="row-actions"><button class="btn ghost" id="refreshNodesBtn">拉取节点</button><button class="btn primary" id="startFilterBtn">开始实测筛选</button></div>
         </div>
         <div class="node-meta" id="nodeSourceMeta">正在读取候选节点…</div>
+        <div class="node-meta" id="testJobMeta">默认实测当前筛选结果中排名靠前的 5 个候选节点。</div>
         <div class="filters">
           <select id="countryFilter"><option value="">全部地区</option></select>
           <select id="nodeStatusFilter"><option value="">全部状态</option><option value="candidate">候选</option><option value="available">可用</option><option value="testing">测试中</option><option value="unavailable">不可用</option></select>
@@ -139,7 +140,7 @@
     <section class="page" id="page-tests">
       <article class="panel">
         <div class="panel-head"><div><h2>测试记录</h2><p>记录延迟、上下行、出口 IP、住宅判断、稳定性与失败原因</p></div><button class="btn ghost" disabled>清理记录</button></div>
-        <div class="empty">暂无真实连接测试记录</div>
+        <div id="testsList" class="cards"><div class="empty">暂无真实连接测试记录</div></div>
       </article>
     </section>
 
@@ -182,11 +183,11 @@
 
       <article class="panel notice">
         <strong>开发版说明</strong>
-        <p>当前已接入 VPN Gate 候选资源池与面板账号修改。候选节点尚未经过 GateSocks 本 VPS 的 OpenVPN 实连、住宅/风险、上下行与稳定性验证，因此不能直接视为“可用出口”。</p>
+        <p>当前已接入 VPN Gate 候选资源池、OpenVPN 安全实连测试与面板账号修改。实测使用独立 UID 策略路由，只让测速进程走临时 VPN 隧道，不修改 GateSocks Web 服务的默认路由；住宅属性属于第三方网络属性信号，应视为倾向判断而非绝对证明。</p>
       </article>
     </section>
   </main>
 </div>
-<script src="/static/app.js?v=0.4.0-dev"></script>
+<script src="/static/app.js?v=0.4.1-dev"></script>
 </body>
 </html>

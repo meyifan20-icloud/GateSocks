@@ -11,6 +11,7 @@ const pageMeta = {
 const qs = s => document.querySelector(s);
 const qsa = s => [...document.querySelectorAll(s)];
 let allNodes=[];
+let testPollTimer=null;
 
 function showPage(name){
   qsa(".nav-item").forEach(x=>x.classList.toggle("active",x.dataset.page===name));
@@ -34,6 +35,9 @@ if(logoutBtn) logoutBtn.onclick=async()=>{ await fetch("/api/logout",{method:"PO
 
 const refreshNodesBtn=qs("#refreshNodesBtn");
 if(refreshNodesBtn) refreshNodesBtn.onclick=()=>loadNodes(true);
+
+const startFilterBtn=qs("#startFilterBtn");
+if(startFilterBtn) startFilterBtn.onclick=startRealTests;
 
 ["#countryFilter","#nodeStatusFilter","#nodeSearch"].forEach(sel=>{
   const el=qs(sel);
@@ -92,22 +96,29 @@ function statusText(value){
   return {candidate:"候选",available:"可用",testing:"测试中",unavailable:"不可用"}[value]||value||"-";
 }
 
-function renderNodes(){
-  const table=qs("#nodesTable");
-  if(!table) return;
+function filteredNodes(){
   const country=(qs("#countryFilter")?.value||"").toUpperCase();
   const status=qs("#nodeStatusFilter")?.value||"";
   const search=(qs("#nodeSearch")?.value||"").trim().toLowerCase();
-  const items=allNodes.filter(n=>{
+  return allNodes.filter(n=>{
     if(country && n.country_short!==country) return false;
     if(status && n.status!==status) return false;
     if(search){
-      const hay=[n.ip,n.hostname,n.country_short,n.country_long,n.operator].join(" ").toLowerCase();
+      const hay=[n.ip,n.hostname,n.country_short,n.country_long,n.operator,n.isp,n.asn,n.exit_ip].join(" ").toLowerCase();
       if(!hay.includes(search)) return false;
     }
     return true;
   });
+}
 
+function fmt(value,suffix=""){
+  return value===null||value===undefined||value===""?"-":String(value)+suffix;
+}
+
+function renderNodes(){
+  const table=qs("#nodesTable");
+  if(!table) return;
+  const items=filteredNodes();
   table.innerHTML="";
   if(!items.length){
     const tr=document.createElement("tr");
@@ -115,30 +126,28 @@ function renderNodes(){
     const empty=document.createElement("div"); empty.className="empty compact"; empty.textContent="没有符合当前筛选条件的节点";
     td.appendChild(empty); tr.appendChild(td); table.appendChild(tr); return;
   }
-
   items.forEach(n=>{
     const tr=document.createElement("tr");
+    if(n.test_error) tr.title=n.test_error;
     const values=[
       n.country_short||"-",
-      n.ip||"-",
-      "待实测",
-      "待实测",
-      n.source_ping_ms==null?"-":n.source_ping_ms+" ms*",
-      n.source_speed_mbps==null?"-":n.source_speed_mbps+" Mbps*",
-      "-",
-      "-",
-      "待实测",
+      n.exit_ip?(n.ip+" → "+n.exit_ip):(n.ip||"-"),
+      n.isp||n.asn||"待实测",
+      n.residential_hint||"待实测",
+      n.latency_ms!=null?fmt(n.latency_ms," ms"):n.source_ping_ms==null?"-":fmt(n.source_ping_ms," ms*"),
+      n.download_mbps!=null?fmt(n.download_mbps," Mbps"):n.source_speed_mbps==null?"-":fmt(n.source_speed_mbps," Mbps*"),
+      n.upload_mbps!=null?fmt(n.upload_mbps," Mbps"):"-",
+      n.stability_percent!=null?fmt(n.stability_percent,"%"):"-",
+      n.risk||"待实测",
       statusText(n.status)
     ];
-    values.forEach(value=>{
-      const td=document.createElement("td"); td.textContent=value; tr.appendChild(td);
-    });
+    values.forEach(value=>{const td=document.createElement("td"); td.textContent=value; tr.appendChild(td);});
     const action=document.createElement("td");
-    const button=document.createElement("button"); button.className="btn ghost"; button.disabled=true; button.textContent="待实测";
+    const button=document.createElement("button"); button.className="btn ghost"; button.disabled=true;
+    button.textContent=n.status==="available"?"已实测":"待实测";
     action.appendChild(button); tr.appendChild(action); table.appendChild(tr);
   });
 }
-
 function fillCountryFilter(){
   const select=qs("#countryFilter");
   if(!select) return;
@@ -164,17 +173,87 @@ async function loadNodes(refresh=false){
     renderNodes();
     const count=data.count??allNodes.length;
     const updated=data.updated_at?new Date(data.updated_at).toLocaleString():"尚未缓存";
-    if(meta) meta.textContent=`来源：${data.source||"VPN Gate"} · 候选 ${count} 个 · 更新：${updated} · * Ping/Speed 为公益源公布值，不代表本 VPS 实测`;
+    if(meta) meta.textContent="来源："+(data.source||"VPN Gate")+" · 候选 "+count+" 个 · 更新："+updated+" · * 为公益源公布值，未标 * 的字段来自本 VPS 实测";
     if(qs("#statNodes")) qs("#statNodes").textContent=count;
+    if(startFilterBtn) startFilterBtn.disabled=!allNodes.length;
   }catch(e){
     allNodes=[];
     renderNodes();
     if(meta) meta.textContent="节点池读取失败："+e.message;
+    if(startFilterBtn) startFilterBtn.disabled=true;
   }finally{
     if(button){button.disabled=false;button.textContent="拉取节点";}
   }
 }
 
+async function startRealTests(){
+  const visible=filteredNodes().filter(n=>n.status!=="testing");
+  const meta=qs("#testJobMeta");
+  if(!visible.length){if(meta) meta.textContent="当前筛选条件下没有可测试节点。";return;}
+  const ids=visible.slice(0,5).map(n=>n.id);
+  startFilterBtn.disabled=true; startFilterBtn.textContent="启动中…";
+  try{
+    const data=await getJson("/api/tests/start",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({ids,limit:5})});
+    if(meta) meta.textContent="实测已启动："+data.total+" 个节点。单节点会建立临时 OpenVPN 隧道并测试出口、延迟、上下行与稳定性。";
+    beginTestPolling();
+  }catch(e){
+    if(meta) meta.textContent="实测启动失败："+e.message;
+    startFilterBtn.disabled=false; startFilterBtn.textContent="开始实测筛选";
+  }
+}
+
+function beginTestPolling(){
+  if(testPollTimer) clearInterval(testPollTimer);
+  pollTestJob();
+  testPollTimer=setInterval(pollTestJob,2500);
+}
+
+async function pollTestJob(){
+  try{
+    const job=await getJson("/api/tests/status");
+    const meta=qs("#testJobMeta");
+    if(job.running){
+      if(startFilterBtn){startFilterBtn.disabled=true;startFilterBtn.textContent="实测中 "+job.completed+"/"+job.total;}
+      if(meta) meta.textContent="实测进行中："+job.completed+"/"+job.total+(job.current_id?" · 当前 "+job.current_id:"")+"。测试期间 Web 面板流量不会切入临时 VPN。";
+    }else{
+      if(startFilterBtn){startFilterBtn.disabled=!allNodes.length;startFilterBtn.textContent="开始实测筛选";}
+      if(job.total){
+        if(meta) meta.textContent="最近实测完成："+job.completed+"/"+job.total+(job.last_error?" · 最近失败原因："+job.last_error:"");
+        await Promise.all([loadNodes(false),loadTests()]);
+      }
+      if(testPollTimer){clearInterval(testPollTimer);testPollTimer=null;}
+    }
+  }catch(e){
+    if(testPollTimer){clearInterval(testPollTimer);testPollTimer=null;}
+    if(startFilterBtn){startFilterBtn.disabled=false;startFilterBtn.textContent="开始实测筛选";}
+  }
+}
+
+async function loadTests(){
+  const list=qs("#testsList");
+  if(!list) return;
+  try{
+    const data=await getJson("/api/tests");
+    const items=data.items||[];
+    list.innerHTML="";
+    if(!items.length){list.innerHTML="<div class=\"empty\">暂无真实连接测试记录</div>";return;}
+    items.slice(0,50).forEach(t=>{
+      const card=document.createElement("div"); card.className="proxy-card";
+      const head=document.createElement("div"); head.className="proxy-head";
+      const left=document.createElement("div");
+      const strong=document.createElement("strong"); strong.textContent=(t.country_short||"-")+" · "+(t.source_ip||"-");
+      const span=document.createElement("span"); span.textContent=t.tested_at?new Date(t.tested_at).toLocaleString():"";
+      left.append(strong,span);
+      const state=document.createElement("span"); state.className="pill "+(t.status==="available"?"ok":""); state.textContent=statusText(t.status);
+      head.append(left,state);
+      const grid=document.createElement("div"); grid.className="mini-grid";
+      [["出口 IP",t.exit_ip||"-"],["延迟",t.latency_ms==null?"-":t.latency_ms+" ms"],["下载",t.download_mbps==null?"-":t.download_mbps+" Mbps"],["上传",t.upload_mbps==null?"-":t.upload_mbps+" Mbps"],["稳定性",t.stability_percent==null?"-":t.stability_percent+"%"],["住宅/风险",(t.residential_hint||"未知")+" / "+(t.risk||"未知")]].forEach(([a,b])=>{const d=document.createElement("div");const s=document.createElement("span");s.textContent=a;const v=document.createElement("strong");v.textContent=b;d.append(s,v);grid.appendChild(d);});
+      card.append(head,grid);
+      if(t.error){const err=document.createElement("p");err.className="form-message error";err.textContent=t.error;card.appendChild(err);}
+      list.appendChild(card);
+    });
+  }catch(e){list.innerHTML="<div class=\"empty\">测试记录读取失败</div>";}
+}
 async function loadOpenVPN(){
   try{
     const o=await getJson("/api/openvpn");
@@ -250,7 +329,8 @@ async function loadLogs(){
 }
 
 async function loadAll(){
-  await Promise.all([loadMe(),loadStatus(),loadOpenVPN(),loadSettings(),loadLogs(),loadNodes(false)]);
+  await Promise.all([loadMe(),loadStatus(),loadOpenVPN(),loadSettings(),loadLogs(),loadNodes(false),loadTests()]);
+  pollTestJob();
 }
 
 const initial=location.hash.replace("#","")||"dashboard";

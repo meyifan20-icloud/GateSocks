@@ -1,7 +1,7 @@
 FROM python:3.12-slim
 
 ARG DEBIAN_FRONTEND=noninteractive
-ARG GATESOCKS_VERSION=0.4.0-dev
+ARG GATESOCKS_VERSION=0.4.1-dev
 
 LABEL org.opencontainers.image.title="GateSocks" \
       org.opencontainers.image.description="SOCKS5 exit manager and web panel" \
@@ -17,6 +17,7 @@ RUN apt-get update \
        ca-certificates \
        iputils-ping \
        procps \
+       util-linux \
        tini \
     && rm -rf /var/lib/apt/lists/*
 

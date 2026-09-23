@@ -2,7 +2,7 @@
 
 GateSocks 是一个面向个人 VPS 的 SOCKS5 出口筛选、验证与管理项目。Web 面板负责节点池、SOCKS5、OpenVPN 隧道、测试记录、日志和设置；OpenVPN 是底层出口隧道，SOCKS5 是主要使用入口。
 
-当前开发版本：`v0.4.0-dev`。
+当前开发版本：`v0.4.1-dev`。
 
 ## Docker image
 
@@ -88,3 +88,12 @@ gatesocks.zhangbao20.ccwu.cc:2096 {
 - 节点缓存持久化到 `./data/vpngate_nodes.json`，OpenVPN 配置数据只保存在后端缓存，不下发到浏览器表格。
 - “设置 → 管理员账号”新增修改用户名/密码；要求输入当前密码，新密码使用 PBKDF2-SHA256 哈希后保存到 `./config/auth.json`，不写入仓库；修改后旧 Session 自动失效并签发当前 Session。
 - Docker 构建增加 Python 语法检查，工作流版本同步到 `v0.4.0-dev`。
+
+## v0.4.1-dev
+
+- 启用“开始实测筛选”：默认对当前筛选结果前 5 个候选逐个建立临时 OpenVPN 隧道。
+- 测试隧道使用独立 Linux UID 策略路由表，只把测速进程送入临时 TUN，避免修改 GateSocks Web/Caddy 的默认路由。
+- 实测真实出口 IPv4、TLS 建连延迟、约 2 MB 下载、约 512 KB 上传、3 次出口连续性；结果持久化到 `./data/test_results.json`。
+- 使用公开 IP 属性接口补充 ISP/ASN 与 hosting/proxy/mobile 信号；“住宅倾向”保留“需复核”标记，不把单一数据库信号当作住宅 IP 的绝对证明。
+- OpenVPN 配置在执行前移除脚本、plugin、management、route/redirect-gateway 等会执行外部代码或改变全局路由的指令。
+- 测试记录页同步展示成功与失败原因；实测按钮支持任务进度轮询。
