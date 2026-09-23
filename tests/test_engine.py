@@ -29,13 +29,15 @@ CERTDATA
         self.assertNotIn("dev tun", clean)
 
     def test_openvpn_command_has_explicit_tun_and_vpngate_cipher(self):
-        cmd = app.build_openvpn_command(Path("/tmp/test.ovpn"), "tun-gstest0", Path("/tmp/vpngate.auth"))
+        cmd = app.build_openvpn_command(Path("/tmp/test.ovpn"), "tun-gstest0")
         joined = " ".join(cmd)
         self.assertIn("--dev tun-gstest0", joined)
         self.assertIn("--dev-type tun", joined)
         self.assertIn("--disable-dco", joined)
         self.assertIn("--route-nopull", joined)
-        self.assertIn("--auth-user-pass /tmp/vpngate.auth", joined)
+        self.assertIn("--pull-filter ignore route-ipv6", joined)
+        self.assertIn("--connect-timeout 15", joined)
+        self.assertNotIn("--auth-user-pass", joined)
         self.assertIn("AES-128-CBC", joined)
         self.assertNotIn("--hand-window", joined)
 
@@ -84,6 +86,20 @@ remote 203.0.113.10 443
         clean = app.sanitized_ovpn(base64.b64encode(raw.encode()).decode())
         self.assertNotIn("auth-user-pass", clean)
         self.assertIn("remote 203.0.113.10 443", clean)
+
+    def test_openvpn_command_adds_auth_only_when_requested(self):
+        cmd = app.build_openvpn_command(
+            Path("/tmp/test.ovpn"),
+            "tun-gstest0",
+            Path("/tmp/vpngate.auth"),
+        )
+        self.assertIn("--auth-user-pass /tmp/vpngate.auth", " ".join(cmd))
+
+    def test_vpngate_profile_auth_detection(self):
+        no_auth = "client\nremote 203.0.113.10 443\n"
+        with_auth = "client\nauth-user-pass\nremote 203.0.113.10 443\n"
+        self.assertFalse(app.vpngate_profile_requests_auth(base64.b64encode(no_auth.encode()).decode()))
+        self.assertTrue(app.vpngate_profile_requests_auth(base64.b64encode(with_auth.encode()).decode()))
 
 
 if __name__ == "__main__":
