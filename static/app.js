@@ -344,7 +344,12 @@ async function createSocksFromSelected(nodeId,button,message){
     const item=data.instance||{};
     await Promise.all([loadSocks(),loadOpenVPN(),loadStatus()]);
     if(item.status==="online"){
-      if(message){message.textContent="SOCKS5 已生成并启用："+(item.name||item.id);message.className="form-message ok";}
+      if(message){
+        const connectHost=item.connect_host||item.host||"VPS";
+        const vpnExit=item.vpn_exit_ip||item.exit_ip||"待确认";
+        message.textContent="SOCKS5 已生成："+connectHost+":"+item.port+"；流量真实出口 "+vpnExit;
+        message.className="form-message ok";
+      }
       showPage("socks");
     }else{
       if(message){message.textContent="实例已建立记录，但启动失败："+(item.last_error||item.status||"未知错误");message.className="form-message error";}
@@ -602,8 +607,8 @@ async function loadSocks(){
       head.append(left,state); card.appendChild(head);
 
       const grid=document.createElement("div"); grid.className="mini-grid";
-      appendMetric(grid,"接入节点",item.source_ip||"-");
-      appendMetric(grid,"真实出口",item.exit_ip||"-");
+      appendMetric(grid,"VPN Gate 接入节点",item.vpn_source_ip||item.source_ip||"-");
+      appendMetric(grid,"SOCKS5 真实出口",item.vpn_exit_ip||item.exit_ip||"-");
       appendMetric(grid,"ISP / ASN",[item.isp,item.asn].filter(Boolean).join(" / ")||"-");
       appendMetric(grid,"OpenVPN / TUN",item.tun_name||"-");
       const probe=item.last_probe||{};
@@ -625,13 +630,20 @@ async function loadSocks(){
       const external=document.createElement("div"); external.className="access-box";
       const eh=document.createElement("h3"); eh.textContent="外部访问";
       const en=document.createElement("p"); en.className="access-note";
-      en.textContent=item.host?"完整地址二维码可供支持 SOCKS5 URI 的移动代理客户端扫码添加。":"未自动识别 VPS 公网地址；可通过 GATESOCKS_PUBLIC_HOST 指定后再使用外部二维码。";
+      const connectHost=item.connect_host||item.host||"";
+      const vpnSource=item.vpn_source_ip||item.source_ip||"";
+      const vpnExit=item.vpn_exit_ip||item.exit_ip||"";
+      en.textContent=connectHost
+        ?"客户端连接的是 GateSocks VPS；服务器地址固定为本 VPS 公网 IP。所选 VPN Gate 节点只负责上游隧道，流量从“真实出口 IP”出站。"
+        :"未自动识别 VPS 公网地址；可通过 GATESOCKS_PUBLIC_HOST 指定后再使用外部访问。";
       external.append(eh,en);
-      appendAccessRow(external,"地址",item.host||"",true);
-      appendAccessRow(external,"端口",item.port?String(item.port):"",true);
+      appendAccessRow(external,"SOCKS5 服务器（VPS）",connectHost,true);
+      appendAccessRow(external,"服务端口",item.port?String(item.port):"",true);
+      appendAccessRow(external,"VPN Gate 接入节点",vpnSource,false);
+      appendAccessRow(external,"真实出口 IP",vpnExit,false);
       appendAccessRow(external,"用户名",item.username||"",true);
       appendAccessRow(external,"密码",item.password||"",true);
-      appendAccessRow(external,"完整地址",item.url||"",true);
+      appendAccessRow(external,"客户端导入地址",item.url||"",true);
       accessGrid.append(local,external);
       card.appendChild(accessGrid);
 

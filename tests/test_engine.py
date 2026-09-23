@@ -86,6 +86,33 @@ CERTDATA
         uri = app.build_socks_uri("2001:db8::1", 18001, "u", "p")
         self.assertEqual(uri, "socks5://u:p@[2001:db8::1]:18001")
 
+    def test_public_socks_instance_separates_client_endpoint_from_vpn_path(self):
+        instance = {
+            "id": "abc123def456",
+            "port": 18001,
+            "username": "user",
+            "password": "pass",
+            "enabled": True,
+            "source_ip": "219.100.37.92",
+            "exit_ip": "219.100.37.238",
+        }
+        with patch.object(app, "detect_public_host", return_value="204.152.194.61"), \
+             patch.object(app, "runtime_active", return_value=True):
+            item = app.public_socks_instance(instance)
+        self.assertEqual(item["connect_host"], "204.152.194.61")
+        self.assertEqual(item["vpn_source_ip"], "219.100.37.92")
+        self.assertEqual(item["vpn_exit_ip"], "219.100.37.238")
+        self.assertEqual(item["url"], "socks5://user:pass@204.152.194.61:18001")
+        self.assertNotIn("219.100.37.92:18001", item["url"])
+        self.assertNotIn("219.100.37.238:18001", item["url"])
+
+    def test_frontend_labels_vps_endpoint_and_vpn_path_separately(self):
+        source = Path("static/app.js").read_text(encoding="utf-8")
+        self.assertIn("SOCKS5 服务器（VPS）", source)
+        self.assertIn("VPN Gate 接入节点", source)
+        self.assertIn("真实出口 IP", source)
+        self.assertIn("客户端连接的是 GateSocks VPS", source)
+
     def test_vpngate_auth_file_is_controlled(self):
         import tempfile
         with tempfile.TemporaryDirectory() as tmp:

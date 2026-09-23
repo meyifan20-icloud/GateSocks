@@ -1175,6 +1175,15 @@ def public_socks_instance(instance: dict) -> dict:
     item["desired_enabled"] = bool(instance.get("enabled"))
     item["status"] = effective_instance_status(instance)
     item["local_host"] = "127.0.0.1"
+
+    # A GateSocks client always connects to this VPS. The selected VPN Gate IP
+    # is an upstream OpenVPN peer and the observed exit_ip is the egress address;
+    # neither is a routable SOCKS5 listener for the remote client.
+    item["connect_host"] = host
+    item["vpn_source_ip"] = item.get("source_ip")
+    item["vpn_exit_ip"] = item.get("exit_ip")
+
+    # Backward-compatible aliases for older frontends/API consumers.
     item["host"] = host
     item["address"] = host
     item["local_uri"] = build_socks_uri("127.0.0.1", item["port"], item["username"], item["password"])
