@@ -4,6 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>GateSocks</title>
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
@@ -23,7 +25,7 @@
       <button class="nav-item" data-page="settings">设置</button>
     </nav>
     <div class="sidebar-foot">
-      <span id="version">v0.3.0-dev</span>
+      <span id="version">v0.3.1-dev</span>
       <span class="status-dot"></span> Development
     </div>
   </aside>
@@ -36,6 +38,8 @@
         <p id="pageDesc">查看 GateSocks 当前运行状态与出口概况</p>
       </div>
       <div class="top-actions">
+        <span class="user-chip" id="currentUser">admin</span>
+        <button class="btn ghost" id="logoutBtn">退出</button>
         <span class="badge" id="serviceBadge">连接中</span>
         <button class="btn ghost" id="refreshBtn">刷新</button>
       </div>

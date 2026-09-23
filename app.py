@@ -20,7 +20,7 @@ STATIC_DIR = APP_DIR / "static"
 
 BIND = os.getenv("GATESOCKS_BIND", "0.0.0.0")
 PORT = int(os.getenv("GATESOCKS_PORT", "19080"))
-VERSION = os.getenv("GATESOCKS_VERSION", "0.3.0-dev")
+VERSION = os.getenv("GATESOCKS_VERSION", "0.3.1-dev")
 SOCKS_START = int(os.getenv("GATESOCKS_SOCKS_START", "18001"))
 SOCKS_END = int(os.getenv("GATESOCKS_SOCKS_END", "18099"))
 TEST_START = int(os.getenv("GATESOCKS_TEST_START", "18100"))
@@ -110,7 +110,7 @@ def session_user(request: Request) -> str | None:
 @app.middleware("http")
 async def require_auth(request: Request, call_next):
     path = request.url.path
-    public = path == "/health" or path == "/login" or path == "/api/login" or path == "/api/me" or path.startswith("/static/")
+    public = path == "/health" or path == "/favicon.ico" or path == "/login" or path == "/api/login" or path == "/api/me" or path.startswith("/static/")
     if not public and not session_user(request):
         if path.startswith("/api/"):
             return JSONResponse({"detail": "authentication required"}, status_code=401)
@@ -121,6 +121,11 @@ async def require_auth(request: Request, call_next):
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "GateSocks", "version": VERSION}
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    return FileResponse(STATIC_DIR / "favicon.svg", media_type="image/svg+xml")
 
 
 @app.get("/login")

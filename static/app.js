@@ -23,7 +23,10 @@ qsa(".nav-item").forEach(x=>x.onclick=()=>showPage(x.dataset.page));
 qsa("[data-jump]").forEach(x=>x.onclick=()=>showPage(x.dataset.jump));
 qs("#menuBtn").onclick=()=>qs("#sidebar").classList.toggle("open");
 qs("#refreshBtn").onclick=()=>loadAll();
-qs("#reloadLogs").onclick=()=>loadLogs();\nqs("#logoutBtn").onclick=async()=>{ await fetch("/api/logout",{method:"POST"}); location.replace("/login"); };
+const reloadLogs=qs("#reloadLogs");
+if(reloadLogs) reloadLogs.onclick=()=>loadLogs();
+const logoutBtn=qs("#logoutBtn");
+if(logoutBtn) logoutBtn.onclick=async()=>{ await fetch("/api/logout",{method:"POST"}); location.replace("/login"); };
 
 function kv(label,value){
   const box=document.createElement("div"); box.className="kv";
@@ -34,8 +37,18 @@ function kv(label,value){
 
 async function getJson(url){
   const r=await fetch(url,{cache:"no-store"});
+  if(r.status===401){ location.replace("/login"); throw new Error("authentication required"); }
   if(!r.ok) throw new Error(url+" "+r.status);
   return r.json();
+}
+
+async function loadMe(){
+  try{
+    const m=await getJson("/api/me");
+    if(!m.authenticated){ location.replace("/login"); return; }
+    const el=qs("#currentUser");
+    if(el) el.textContent=m.username||"admin";
+  }catch(e){}
 }
 
 async function loadStatus(){
@@ -92,7 +105,7 @@ async function loadLogs(){
 }
 
 async function loadAll(){
-  await Promise.all([loadStatus(),loadOpenVPN(),loadSettings(),loadLogs()]);
+  await Promise.all([loadMe(),loadStatus(),loadOpenVPN(),loadSettings(),loadLogs()]);
 }
 const initial=location.hash.replace("#","")||"dashboard";
 if(pageMeta[initial]) showPage(initial);
