@@ -1,7 +1,7 @@
 const pageMeta = {
   dashboard:["仪表盘","查看 GateSocks 当前运行状态与出口概况"],
   nodes:["节点池","筛选、测试并选择真实可用的候选出口"],
-  socks:["SOCKS5","管理已生成的本地与外部 SOCKS5 访问地址"],
+  socks:["SOCKS5","选择待生成节点并管理已经生成的 SOCKS5 实例"],
   openvpn:["OpenVPN","查看 SOCKS5 背后的 OpenVPN 隧道状态"],
   tests:["测试记录","查看延迟、速度、稳定性与出口检测历史"],
   logs:["日志","查看 GateSocks 当前运行日志"],
@@ -548,7 +548,7 @@ async function loadSocks(){
     const data=await getJson("/api/socks");
     const items=data.items||[];
     if(!items.length){
-      list.innerHTML='<div class="empty">尚未生成 SOCKS5 实例。先到节点池点击一个 IP，再从仪表盘“当前待生成节点”生成。</div>';
+      list.innerHTML='<div class="empty">尚未生成 SOCKS5 实例。先到节点池点击一个 IP，再回到本页顶部从“当前待生成节点”生成。</div>';
       return;
     }
     list.innerHTML="";

@@ -6,7 +6,7 @@
   <title>GateSocks</title>
   <link rel="icon" href="/favicon.ico" sizes="any">
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-  <link rel="stylesheet" href="/static/app.css?v=0.4.7-dev">
+  <link rel="stylesheet" href="/static/app.css?v=0.4.8-dev">
 </head>
 <body>
 <div class="app-shell">
@@ -25,7 +25,7 @@
       <button class="nav-item" data-page="settings">设置</button>
     </nav>
     <div class="sidebar-foot">
-      <span id="version">v0.4.7-dev</span>
+      <span id="version">v0.4.8-dev</span>
       <span class="status-dot"></span> Development
     </div>
   </aside>
@@ -68,10 +68,6 @@
         </article>
       </div>
 
-      <article class="panel">
-        <div class="panel-head"><div><h2>当前待生成节点（单选）</h2><p>这里只保存“下一次准备生成 SOCKS5 的目标节点”；不占端口、不建立长期隧道，也不会影响已经生效的 SOCKS5 实例。</p></div><button class="btn primary" data-jump="nodes">选择 / 更换待生成节点</button></div>
-        <div id="selectedNodeCard" class="empty">当前还没有选择节点。</div>
-      </article>
     </section>
 
     <section class="page" id="page-nodes">
@@ -99,10 +95,13 @@
     <section class="page" id="page-socks">
       <article class="panel">
         <div class="panel-head">
-          <div><h2>SOCKS5 实例</h2><p>这里显示所有已经生成的实例；在线、停止和异常实例都会保留，只有“删除实例”才会释放端口、隧道和实例数据。</p></div>
-          <button class="btn primary" data-jump="nodes">新增 SOCKS5 实例</button>
+          <div><h2>当前待生成节点（单选）</h2><p>这里只保存“下一次准备生成 SOCKS5 的目标节点”；不占端口、不建立长期隧道，也不会影响已经生效的 SOCKS5 实例。</p></div>
+          <button class="btn primary" data-jump="nodes">选择 / 更换待生成节点</button>
         </div>
-        <div class="node-meta">新增流程：节点池点击一个 IP → 仪表盘“当前待生成节点” → “生成并启用 SOCKS5”。候选、实测通过或本次实测失败节点都允许尝试生成。</div>
+        <div id="selectedNodeCard" class="empty">当前还没有选择节点。</div>
+      </article>
+
+      <article class="panel">
         <div id="socksList" class="cards"><div class="empty">尚未生成 SOCKS5 实例。</div></div>
       </article>
     </section>
@@ -180,6 +179,6 @@
     <code id="qrText" class="qr-text"></code>
   </div>
 </div>
-<script src="/static/app.js?v=0.4.7-dev"></script>
+<script src="/static/app.js?v=0.4.8-dev"></script>
 </body>
 </html>
