@@ -64,18 +64,41 @@ document.addEventListener("keydown",e=>{if(e.key==="Escape" && qrModal && !qrMod
 function closeQr(){
   if(qrObjectUrl){URL.revokeObjectURL(qrObjectUrl);qrObjectUrl=null;}
   if(qrModal) qrModal.hidden=true;
-  const img=qs("#qrImage"); if(img) img.removeAttribute("src");
+  const img=qs("#qrImage");
+  if(img){img.removeAttribute("src");img.hidden=false;}
+}
+
+function showQrError(message,label="代理信息"){
+  if(qrObjectUrl){URL.revokeObjectURL(qrObjectUrl);qrObjectUrl=null;}
+  const img=qs("#qrImage");
+  if(img){img.removeAttribute("src");img.hidden=true;}
+  qs("#qrTitle").textContent="二维码生成失败";
+  qs("#qrSubtitle").textContent=label;
+  qs("#qrText").textContent=message||"二维码生成失败";
+  qrModal.hidden=false;
 }
 
 async function showQr(text,label="代理信息"){
-  if(!text) return;
-  const r=await fetch("/api/qr",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text,label})});
+  if(!text) throw new Error("二维码内容为空");
+  const r=await fetch("/api/qr",{
+    method:"POST",
+    cache:"no-store",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({text})
+  });
   if(r.status===401){location.replace("/login");return;}
-  if(!r.ok){const data=await r.json().catch(()=>({}));throw new Error(data.detail||"二维码生成失败");}
+  if(!r.ok){
+    const data=await r.json().catch(()=>({}));
+    throw new Error(data.detail||("二维码生成失败（HTTP "+r.status+"）"));
+  }
+  const contentType=(r.headers.get("content-type")||"").toLowerCase();
+  if(!contentType.includes("image/svg+xml")) throw new Error("二维码接口返回了无效内容");
   const blob=await r.blob();
   if(qrObjectUrl) URL.revokeObjectURL(qrObjectUrl);
   qrObjectUrl=URL.createObjectURL(blob);
-  qs("#qrImage").src=qrObjectUrl;
+  const img=qs("#qrImage");
+  img.hidden=false;
+  img.src=qrObjectUrl;
   qs("#qrTitle").textContent=label;
   qs("#qrSubtitle").textContent=label==="完整地址"?"可供支持 SOCKS5 URI 的移动代理客户端扫码添加":"扫码读取该字段文本";
   qs("#qrText").textContent=text;
@@ -95,7 +118,20 @@ function appendAccessRow(container,label,value,enableQr=true){
   const code=document.createElement("code"); code.textContent=value||"-";
   const copy=document.createElement("button"); copy.textContent="复制"; copy.disabled=!value; copy.onclick=()=>copyText(value,copy);
   row.append(l,code,copy);
-  if(enableQr){const qr=document.createElement("button");qr.textContent="二维码";qr.disabled=!value;qr.onclick=()=>showQr(value,label).catch(()=>{});row.appendChild(qr);}
+  if(enableQr){
+    const qr=document.createElement("button");
+    qr.textContent="二维码";
+    qr.disabled=!value;
+    qr.onclick=async()=>{
+      const old=qr.textContent;
+      qr.disabled=true;
+      qr.textContent="生成中…";
+      try{await showQr(value,label);}
+      catch(e){showQrError(e.message,label);}
+      finally{qr.disabled=!value;qr.textContent=old;}
+    };
+    row.appendChild(qr);
+  }
   container.appendChild(row);
   return row;
 }

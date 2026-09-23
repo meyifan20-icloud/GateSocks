@@ -239,3 +239,12 @@ gatesocks.zhangbao20.ccwu.cc:2096 {
 - 开发修改不再需要直接拿 main 做第一次 CI 试错；后续维护可先在独立开发分支验证，同一提交通过后再快进 main，显著减少 main 中间失败提交及对应失败邮件。
 - 将 actions/checkout 从 v4 升级到 v5，适配 GitHub Actions 的 Node.js 24 运行环境，消除 checkout@v4 的 Node.js 20 弃用警告。
 - 保留 VERSION 单一版本源、Compose 防 GATESOCKS_VERSION 回归、Python/JS/Compose/单元测试等现有预检；镜像发布仍保持 ghcr.io/meyifan20-icloud/gatesocks:latest-dev。
+
+
+## v0.4.17-dev
+
+- 修复 SOCKS5“外部访问”二维码按钮点击无反应：根因是后端把中文字段名（例如“地址”“完整地址”）写入自定义 HTTP 响应头，Starlette 响应头按 latin-1 编码时会触发 UnicodeEncodeError，导致 /api/qr 返回 500。
+- 删除二维码接口中无实际用途的 X-QR-Label 响应头；字段名称只保留在前端展示层，后端仅接收需要编码的二维码文本并返回 SVG。
+- 二维码请求增加 no-store 与响应 Content-Type 校验，避免缓存或异常响应被当作图片显示。
+- 前端不再静默吞掉二维码生成异常：按钮点击时显示“生成中…”，失败会打开二维码弹窗并显示真实错误原因，便于后续排障。
+- 增加二维码响应与前端错误处理防回归测试，覆盖本次中文响应头故障。

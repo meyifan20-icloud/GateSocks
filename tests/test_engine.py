@@ -60,6 +60,19 @@ CERTDATA
         with self.assertRaises(ValueError):
             app.build_qr_svg("")
 
+    def test_qr_response_supports_chinese_ui_labels_without_header_encoding(self):
+        response = app.build_qr_response("socks5://user:pass@example.com:18001")
+        self.assertEqual(response.media_type, "image/svg+xml")
+        self.assertIn(b"<svg", response.body)
+        self.assertNotIn("x-qr-label", {key.lower() for key in response.headers.keys()})
+        self.assertEqual(response.headers.get("cache-control"), "no-store, max-age=0")
+
+    def test_qr_frontend_surfaces_errors_instead_of_swallowing_them(self):
+        source = Path("static/app.js").read_text(encoding="utf-8")
+        self.assertIn("function showQrError", source)
+        self.assertNotIn("showQr(value,label).catch(()=>{})", source)
+        self.assertIn("body:JSON.stringify({text})", source)
+
     def test_socks_instance_network_values(self):
         values = app.instance_network_values(app.SOCKS_START)
         self.assertEqual(values["tun_name"], f"gst{app.SOCKS_START}")

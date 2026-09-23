@@ -1625,6 +1625,21 @@ def test_status():
         return dict(TEST_JOB)
 
 
+def build_qr_response(text: str) -> Response:
+    # QR labels are a presentation concern and must never be copied into HTTP
+    # headers. Starlette encodes response headers as latin-1, so Chinese labels
+    # such as “地址/二维码” would otherwise raise UnicodeEncodeError and turn a
+    # valid QR request into HTTP 500.
+    return Response(
+        content=build_qr_svg(text),
+        media_type="image/svg+xml",
+        headers={
+            "Cache-Control": "no-store, max-age=0",
+            "Pragma": "no-cache",
+        },
+    )
+
+
 @app.post("/api/qr")
 async def qr_code(request: Request):
     try:
@@ -1633,21 +1648,10 @@ async def qr_code(request: Request):
         return JSONResponse({"detail": "invalid request"}, status_code=400)
 
     text = str(data.get("text", ""))
-    label = str(data.get("label", "")).strip()
     try:
-        svg = build_qr_svg(text)
+        return build_qr_response(text)
     except ValueError as exc:
         return JSONResponse({"detail": str(exc)}, status_code=400)
-
-    return Response(
-        content=svg,
-        media_type="image/svg+xml",
-        headers={
-            "Cache-Control": "no-store, max-age=0",
-            "Pragma": "no-cache",
-            "X-QR-Label": label[:120],
-        },
-    )
 
 @app.get("/api/socks")
 def socks():
