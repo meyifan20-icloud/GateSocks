@@ -28,6 +28,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 APP_DIR = Path(__file__).resolve().parent
+VERSION_FILE = APP_DIR / "VERSION"
 STATIC_DIR = APP_DIR / "static"
 CONFIG_DIR = APP_DIR / "config"
 DATA_DIR = APP_DIR / "data"
@@ -39,9 +40,19 @@ SOCKS_INSTANCES_FILE = DATA_DIR / "socks_instances.json"
 SOCKS_DATA_DIR = DATA_DIR / "socks"
 SOCKS_SERVER_SCRIPT = APP_DIR / "socks_server.py"
 
+def load_build_version() -> str:
+    try:
+        value = VERSION_FILE.read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        raise RuntimeError(f"GateSocks VERSION file is missing: {exc}") from exc
+    if not re.fullmatch(r"\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?", value):
+        raise RuntimeError(f"Invalid GateSocks VERSION value: {value!r}")
+    return value
+
+
 BIND = os.getenv("GATESOCKS_BIND", "0.0.0.0")
 PORT = int(os.getenv("GATESOCKS_PORT", "19080"))
-VERSION = os.getenv("GATESOCKS_VERSION", "0.4.12-dev")
+VERSION = load_build_version()
 SOCKS_START = int(os.getenv("GATESOCKS_SOCKS_START", "18001"))
 SOCKS_END = int(os.getenv("GATESOCKS_SOCKS_END", "18099"))
 TEST_START = int(os.getenv("GATESOCKS_TEST_START", "18100"))
@@ -156,7 +167,9 @@ def tun_interfaces() -> list[dict]:
         if not match:
             continue
         name = match.group(1)
-        if name.startswith(("tun", "tap")):
+        # GateSocks permanent tunnels use gst<port>; temporary tests use tun-gstest*.
+        # Keep generic tun/tap support for compatibility with existing/OpenVPN-created devices.
+        if name.startswith(("gst", "tun", "tap")):
             result.append({
                 "name": name,
                 "state": "UP" if "state UP" in line or ("<" in line and "UP" in line.split(">", 1)[0]) else "UNKNOWN",
@@ -1314,9 +1327,18 @@ async def require_auth(request: Request, call_next):
     public = path == "/health" or path == "/favicon.ico" or path == "/login" or path == "/api/login" or path == "/api/me" or path.startswith("/static/")
     if not public and not session_user(request):
         if path.startswith("/api/"):
-            return JSONResponse({"detail": "authentication required"}, status_code=401)
-        return FileResponse(STATIC_DIR / "login.html", status_code=401)
-    return await call_next(request)
+            response = JSONResponse({"detail": "authentication required"}, status_code=401)
+        else:
+            response = FileResponse(STATIC_DIR / "login.html", status_code=401)
+    else:
+        response = await call_next(request)
+
+    # Development images are upgraded in place via latest-dev. Always revalidate UI assets
+    # and version/status endpoints so a new image cannot be paired with stale browser content.
+    if path in {"/", "/login", "/health", "/api/status", "/api/me"} or path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-store, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+    return response
 
 
 @app.get("/health")

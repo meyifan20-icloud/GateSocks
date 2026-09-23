@@ -1,5 +1,6 @@
 import base64
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 import app
@@ -132,6 +133,22 @@ remote 203.0.113.10 443
     def test_socks_credentials_can_come_from_environment(self):
         self.assertIn("GATESOCKS_PROXY_USERNAME", Path("socks_server.py").read_text(encoding="utf-8"))
         self.assertIn("GATESOCKS_PROXY_PASSWORD", Path("socks_server.py").read_text(encoding="utf-8"))
+
+
+    def test_version_comes_from_version_file_not_environment(self):
+        expected = Path("VERSION").read_text(encoding="utf-8").strip()
+        self.assertEqual(app.VERSION, expected)
+        self.assertNotIn("GATESOCKS_VERSION", Path("docker-compose.yml").read_text(encoding="utf-8"))
+
+    def test_tun_interfaces_include_gatesocks_gst_devices(self):
+        sample = """1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 state UNKNOWN mode DEFAULT
+3: gst18001: <POINTOPOINT,MULTICAST,NOARP,UP,LOWER_UP> mtu 1500 state UNKNOWN mode DEFAULT
+4: tun-gstest0: <POINTOPOINT,MULTICAST,NOARP,UP,LOWER_UP> mtu 1500 state UNKNOWN mode DEFAULT
+5: eth0@if7: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 state UP mode DEFAULT
+"""
+        with patch.object(app, "run", return_value=sample):
+            names = [item["name"] for item in app.tun_interfaces()]
+        self.assertEqual(names, ["gst18001", "tun-gstest0"])
 
 
 

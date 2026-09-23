@@ -2,7 +2,7 @@
 
 GateSocks 是一个面向个人 VPS 的 SOCKS5 出口筛选、验证与管理项目。Web 面板负责节点池、SOCKS5、OpenVPN 隧道、测试记录、日志和设置；OpenVPN 是底层出口隧道，SOCKS5 是主要使用入口。
 
-当前开发版本：`v0.4.12-dev`。
+当前开发版本以仓库根目录 `VERSION` 文件为唯一版本源。
 
 ## Docker image
 
@@ -200,3 +200,14 @@ gatesocks.zhangbao20.ccwu.cc:2096 {
 - Compose 显式增加 `NET_RAW` capability，与 `NET_ADMIN` 一起满足 Linux `SO_BINDTODEVICE` 出站绑定所需权限。
 - SOCKS5 子进程启动时会写入明确的监听地址、端口和 TUN；启动异常会把异常类型与原始错误写入实例 socks.log。
 - 现有实例无需删除，升级后直接“重新连接”即可使用新启动逻辑。
+
+
+## v0.4.13-dev
+
+- 彻底修复版本号漂移：新增仓库根目录 `VERSION` 作为唯一运行时版本源，后端启动时只读取镜像内 `/app/VERSION`，不再读取 `GATESOCKS_VERSION` 环境变量。
+- 删除 Compose 对 `GATESOCKS_VERSION` 的注入，因此即使 VPS 保留旧 Compose 或旧环境变量，新镜像也不会被旧版本号覆盖。
+- Docker 镜像构建标签仍使用版本号，但由 GitHub Actions 直接读取同一个 `VERSION` 文件生成，不再在 workflow 中维护第二份手写版本。
+- 登录页不再硬编码版本，改为从公开 `/health` 读取；主面板继续从 `/api/status` 读取，因此 UI、API、镜像运行版本统一。
+- HTML、静态资源和版本/状态接口增加 no-store/no-cache 响应头，避免 latest-dev 升级后浏览器继续显示旧前端。
+- 修复 OpenVPN 隧道统计：正式实例的 `gst<端口>` 现在与 `tun*`/`tap*` 一样纳入隧道计数；一个在线 SOCKS5 实例对应的 `gst18001` 不再被错误显示为 0 条隧道。
+- CI 增加版本一致性与 Compose 防回归检查，阻止未来再次把 `GATESOCKS_VERSION` 写回 Compose。

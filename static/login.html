@@ -19,11 +19,13 @@
       <div class="auth-error" id="loginError"></div>
       <button class="btn primary auth-submit" type="submit">登录</button>
     </form>
-    <small class="auth-foot">GateSocks · v0.4.12-dev</small>
+    <small class="auth-foot" id="loginVersion">GateSocks · 读取版本中</small>
   </main>
 <script>
 const form=document.getElementById("loginForm");
 const error=document.getElementById("loginError");
+const loginVersion=document.getElementById("loginVersion");
+(async()=>{try{const r=await fetch("/health",{cache:"no-store"});const h=await r.json();if(h.version)loginVersion.textContent="GateSocks · v"+String(h.version).replace(/^v/,"");}catch(e){loginVersion.textContent="GateSocks";}})();
 (async()=>{try{const r=await fetch("/api/me",{cache:"no-store"});const m=await r.json();if(m.authenticated)location.replace("/");if(!m.configured)error.textContent="服务端尚未配置管理员密码与 Session Secret。";}catch(e){}})();
 form.addEventListener("submit",async e=>{
   e.preventDefault(); error.textContent="";
