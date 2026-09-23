@@ -147,9 +147,10 @@ remote 203.0.113.10 443
 5: eth0@if7: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 state UP mode DEFAULT
 """
         with patch.object(app, "run", return_value=sample):
-            names = [item["name"] for item in app.tun_interfaces()]
+            tunnels = app.tun_interfaces()
+            names = [item["name"] for item in tunnels]
         self.assertEqual(names, ["gst18001", "tun-gstest0"])
-        groups = app.tunnel_groups(app.tun_interfaces())
+        groups = app.tunnel_groups(tunnels)
         self.assertEqual([item["name"] for item in groups["instance"]], ["gst18001"])
         self.assertEqual([item["name"] for item in groups["test"]], ["tun-gstest0"])
         self.assertEqual(groups["other"], [])
