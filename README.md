@@ -257,3 +257,15 @@ gatesocks.zhangbao20.ccwu.cc:2096 {
 - SOCKS5 页面将原“地址/端口/完整地址”改为“SOCKS5 服务器（VPS）/服务端口/客户端导入地址”，并额外显示“VPN Gate 接入节点”和“真实出口 IP”。
 - 生成成功提示同时显示客户端连接的 VPS:端口与实际 VPN 出口，便于立即核对所选节点是否真正生效。
 - 增加防回归测试：客户端导入 URI 必须使用 VPS 公网地址；所选 VPN Gate IP 与真实出口 IP 只能作为隧道/出口信息，不能被误写成 SOCKS5 服务端地址。
+
+
+## v0.4.19-dev
+
+- 本版只围绕“VPN Gate 节点必须真实跑通”重构连接核心，不增加无关功能。
+- 删除此前自创的 `vpn/vpn -> no-auth-fallback` 认证回退。OpenVPN 命令构造现在强制要求受控认证文件，临时实测与正式 SOCKS5 隧道统一只使用 VPN Gate 的 `vpn / vpn`。
+- 每次节点实测、SOCKS5 启动和重新连接前，都会重新拉取 VPN Gate 官方 API，并按同一节点 IP（hostname 仅作回退）取得最新 OpenVPN 配置，禁止直接依赖陈旧缓存配置启动长期隧道。
+- 节点 ID 改为只基于 `hostname + IP` 的稳定身份，不再把会变化的 OpenVPN 配置内容写进 ID；配置更新后选择、测试结果与长期实例不应再因为 ID 漂移失联。旧实例仍可按保存的 source_ip 回绑最新节点。
+- `AUTH_FAILED` 不再切换认证方式。发生认证失败时只允许再次刷新同一 VPN Gate 节点；只有官方 OpenVPN 配置确实发生变化才使用新配置重试一次。若配置未变化，或新配置仍 AUTH_FAILED，则明确判定该节点当前不可用。
+- 临时节点实测与正式 SOCKS5 使用同一个 `connect_fresh_vpngate_node` 连接路径，避免“测试通过但生成 SOCKS5 走另一套认证逻辑”。
+- SOCKS5 只有在 OpenVPN TUN 建立、策略路由安装、SOCKS5 监听成功并能经 SOCKS5 读取真实公网出口 IP 后才标记为 online。
+- 新增稳定节点身份、同 IP 回绑、强制受控认证和禁止 no-auth fallback 的防回归测试。

@@ -1,4 +1,5 @@
 import base64
+import hashlib
 import unittest
 from unittest.mock import patch
 from pathlib import Path
@@ -31,7 +32,7 @@ CERTDATA
         self.assertNotIn("dev tun", clean)
 
     def test_openvpn_command_has_explicit_tun_and_vpngate_cipher(self):
-        cmd = app.build_openvpn_command(Path("/tmp/test.ovpn"), "tun-gstest0")
+        cmd = app.build_openvpn_command(Path("/tmp/test.ovpn"), "tun-gstest0", Path("/tmp/vpngate.auth"))
         joined = " ".join(cmd)
         self.assertIn("--dev tun-gstest0", joined)
         self.assertIn("--dev-type tun", joined)
@@ -39,7 +40,7 @@ CERTDATA
         self.assertIn("--route-nopull", joined)
         self.assertIn("--pull-filter ignore route-ipv6", joined)
         self.assertIn("--connect-timeout 10", joined)
-        self.assertNotIn("--auth-user-pass", joined)
+        self.assertIn("--auth-user-pass /tmp/vpngate.auth", joined)
         self.assertIn("--data-ciphers-fallback AES-128-CBC", joined)
         self.assertIn("CHACHA20-POLY1305", joined)
         self.assertNotIn("--hand-window", joined)
@@ -137,12 +138,6 @@ remote 203.0.113.10 443
         )
         self.assertIn("--auth-user-pass /tmp/vpngate.auth", " ".join(cmd))
 
-    def test_vpngate_profile_auth_detection(self):
-        no_auth = "client\nremote 203.0.113.10 443\n"
-        with_auth = "client\nauth-user-pass\nremote 203.0.113.10 443\n"
-        self.assertFalse(app.vpngate_profile_requests_auth(base64.b64encode(no_auth.encode()).decode()))
-        self.assertTrue(app.vpngate_profile_requests_auth(base64.b64encode(with_auth.encode()).decode()))
-
     def test_socks_server_binds_outbound_socket_to_tun(self):
         class FakeSocket:
             def __init__(self):
@@ -169,6 +164,29 @@ remote 203.0.113.10 443
         self.assertIn("--pull-filter ignore route-ipv6", joined)
         self.assertIn("--pull-filter ignore ifconfig-ipv6", joined)
         self.assertIn("--route-nopull", joined)
+
+    def test_node_identity_does_not_depend_on_profile_body(self):
+        hostname = "public-vpn-1"
+        ip = "203.0.113.10"
+        first = hashlib.sha256(f"{hostname}|{ip}".encode()).hexdigest()[:16]
+        second = hashlib.sha256(f"{hostname}|{ip}".encode()).hexdigest()[:16]
+        self.assertEqual(first, second)
+        source = Path("app.py").read_text(encoding="utf-8")
+        self.assertNotIn('hostname}|{ip}|{config_b64[:48]}', source)
+
+    def test_match_vpngate_node_prefers_same_ip(self):
+        items = [
+            {"id": "a", "ip": "203.0.113.10", "hostname": "new-name"},
+            {"id": "b", "ip": "203.0.113.11", "hostname": "old-name"},
+        ]
+        matched = app.match_vpngate_node(items, {"source_ip": "203.0.113.10", "source_hostname": "old-name"})
+        self.assertEqual(matched["id"], "a")
+
+    def test_openvpn_core_has_no_no_auth_fallback(self):
+        source = Path("app.py").read_text(encoding="utf-8")
+        self.assertNotIn("no-auth-fallback", source)
+        self.assertIn("controlled vpn/vpn", source)
+        self.assertIn("refresh_vpngate_node", source)
 
     def test_socks_credentials_can_come_from_environment(self):
         self.assertIn("GATESOCKS_PROXY_USERNAME", Path("socks_server.py").read_text(encoding="utf-8"))

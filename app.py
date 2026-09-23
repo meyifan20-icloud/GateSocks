@@ -353,7 +353,10 @@ def refresh_vpngate_nodes() -> dict:
 
             speed_bps = safe_int(row.get("Speed"))
             ping_ms = safe_int(row.get("Ping"), -1)
-            node_id = hashlib.sha256(f"{hostname}|{ip}|{config_b64[:48]}".encode()).hexdigest()[:16]
+            # Node identity must survive OpenVPN profile refreshes. The profile
+            # body changes independently from the relay identity and must not be
+            # part of the primary key.
+            node_id = hashlib.sha256(f"{hostname}|{ip}".encode()).hexdigest()[:16]
             items.append({
                 "id": node_id,
                 "source": "VPN Gate",
@@ -382,6 +385,27 @@ def refresh_vpngate_nodes() -> dict:
         }
         atomic_write_json(NODE_CACHE_FILE, payload)
         return payload
+
+
+def match_vpngate_node(items: list[dict], node: dict) -> dict | None:
+    source_ip = str(node.get("ip") or node.get("source_ip") or "").strip()
+    hostname = str(node.get("hostname") or node.get("source_hostname") or "").strip()
+    if source_ip:
+        exact = next((item for item in items if str(item.get("ip", "")).strip() == source_ip), None)
+        if exact:
+            return exact
+    if hostname:
+        return next((item for item in items if str(item.get("hostname", "")).strip() == hostname), None)
+    return None
+
+
+def refresh_vpngate_node(node: dict) -> dict:
+    payload = refresh_vpngate_nodes()
+    fresh = match_vpngate_node(payload.get("items", []), node)
+    if not fresh:
+        identity = str(node.get("ip") or node.get("source_ip") or node.get("hostname") or node.get("id") or "unknown")
+        raise RuntimeError(f"VPN Gate 节点 {identity} 已不在最新官方节点列表中")
+    return fresh
 
 
 def read_selected_node() -> dict:
@@ -541,20 +565,6 @@ def ip_metadata(exit_ip: str) -> dict:
     return {}
 
 
-def vpngate_profile_requests_auth(config_b64: str) -> bool:
-    try:
-        text = base64.b64decode(str(config_b64)).decode("utf-8", errors="replace")
-    except Exception:
-        return False
-    for raw in text.splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#") or line.startswith(";"):
-            continue
-        if line.split(None, 1)[0].lower() == "auth-user-pass":
-            return True
-    return False
-
-
 def sanitized_ovpn(config_b64: str) -> str:
     try:
         text = base64.b64decode(config_b64).decode("utf-8", errors="replace")
@@ -605,8 +615,10 @@ def write_vpngate_auth_file(work_dir: Path) -> Path:
     return auth_path
 
 
-def build_openvpn_command(config_path: Path, tun_name: str, auth_path: Path | None = None) -> list[str]:
-    cmd = [
+def build_openvpn_command(config_path: Path, tun_name: str, auth_path: Path) -> list[str]:
+    # VPN Gate's automated connection path is deliberately single-mode:
+    # a controlled vpn/vpn auth file. There is no unauthenticated fallback.
+    return [
         "openvpn",
         "--config", str(config_path),
         "--dev", tun_name,
@@ -616,18 +628,14 @@ def build_openvpn_command(config_path: Path, tun_name: str, auth_path: Path | No
         "--route-nopull",
         "--connect-timeout", "10",
         "--connect-retry-max", "1",
-    ]
-    if auth_path is not None:
-        cmd.extend(["--auth-user-pass", str(auth_path)])
-    cmd.extend([
+        "--auth-user-pass", str(auth_path),
         "--auth-nocache",
         "--disable-dco",
         "--data-ciphers", "AES-128-CBC:AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305",
         "--data-ciphers-fallback", "AES-128-CBC",
         "--cipher", "AES-128-CBC",
         "--verb", "3",
-    ])
-    return cmd
+    ]
 
 
 def openvpn_log_tail(log_path: Path, limit: int = 1200) -> str:
@@ -651,6 +659,15 @@ def wait_openvpn_attempt(proc: subprocess.Popen, log_path: Path, tun_name: str, 
     return False, openvpn_log_tail(log_path, 20000)
 
 
+class OpenVPNAuthFailed(RuntimeError):
+    pass
+
+
+def write_node_config(config_path: Path, node: dict) -> None:
+    config_path.write_text(sanitized_ovpn(str(node.get("openvpn_config_b64", ""))), encoding="utf-8")
+    os.chmod(config_path, 0o600)
+
+
 def start_vpngate_openvpn(
     config_path: Path,
     tun_name: str,
@@ -659,42 +676,63 @@ def start_vpngate_openvpn(
     timeout: int,
 ) -> tuple[subprocess.Popen, str]:
     auth_path = write_vpngate_auth_file(config_path.parent)
-    attempts = [
-        ("vpn/vpn", auth_path),
-        ("no-auth-fallback", None),
-    ]
-    last_tail = ""
-    for index, (mode, candidate_auth) in enumerate(attempts):
-        log_handle.write(f"\n=== OpenVPN attempt: {mode} ===\n")
-        log_handle.flush()
-        proc = subprocess.Popen(
-            build_openvpn_command(config_path, tun_name, candidate_auth),
-            stdout=log_handle,
-            stderr=subprocess.STDOUT,
-            text=True,
-        )
-        ok, log_text = wait_openvpn_attempt(proc, log_path, tun_name, timeout)
-        if ok:
-            return proc, mode
+    log_handle.write("\n=== OpenVPN attempt: controlled vpn/vpn ===\n")
+    log_handle.flush()
+    proc = subprocess.Popen(
+        build_openvpn_command(config_path, tun_name, auth_path),
+        stdout=log_handle,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    ok, log_text = wait_openvpn_attempt(proc, log_path, tun_name, timeout)
+    if ok:
+        return proc, "vpn/vpn"
 
-        last_tail = log_text[-1200:]
-        terminate_process(proc)
-        subprocess.run(["ip", "link", "del", tun_name], capture_output=True)
-
-        # The supplied reference project always uses vpn/vpn.  GateSocks previously
-        # proved that some VPN Gate relays work only when client auth is omitted, so
-        # retry without credentials only for the explicit server-side AUTH_FAILED case.
-        if index == 0 and "AUTH_FAILED" in log_text:
-            log_handle.write("\n=== AUTH_FAILED with vpn/vpn; retrying without auth ===\n")
-            log_handle.flush()
-            time.sleep(0.5)
-            continue
-        break
-
-    compact = last_tail.replace("\n", " ")[-800:]
-    if "AUTH_FAILED" in last_tail:
-        raise RuntimeError("OpenVPN 服务端返回 AUTH_FAILED（vpn/vpn 与无认证回退均未成功）：" + compact)
+    terminate_process(proc)
+    subprocess.run(["ip", "link", "del", tun_name], capture_output=True)
+    compact = log_text.replace("\n", " ")[-800:]
+    if "AUTH_FAILED" in log_text:
+        raise OpenVPNAuthFailed("OpenVPN 服务端返回 AUTH_FAILED（受控 vpn/vpn）：" + compact)
     raise RuntimeError("OpenVPN 未建立隧道：" + compact)
+
+
+def connect_fresh_vpngate_node(
+    node: dict,
+    config_path: Path,
+    tun_name: str,
+    log_path: Path,
+    log_handle,
+    timeout: int,
+) -> tuple[subprocess.Popen, str, dict]:
+    # Always reconnect from the current VPN Gate API profile for this exact relay.
+    fresh = refresh_vpngate_node(node)
+    first_config = str(fresh.get("openvpn_config_b64", ""))
+    write_node_config(config_path, fresh)
+    try:
+        proc, auth_mode = start_vpngate_openvpn(config_path, tun_name, log_path, log_handle, timeout)
+        return proc, auth_mode, fresh
+    except OpenVPNAuthFailed as first_error:
+        # AUTH_FAILED does not change authentication strategy. Re-fetch the same
+        # relay once in case VPN Gate rotated its OpenVPN profile during the attempt.
+        newer = refresh_vpngate_node(fresh)
+        newer_config = str(newer.get("openvpn_config_b64", ""))
+        if newer_config == first_config:
+            raise RuntimeError(
+                "OpenVPN AUTH_FAILED；重新拉取 VPN Gate 官方配置后内容未变化，"
+                "该节点当前不可用。"
+            ) from first_error
+
+        log_handle.write("\n=== VPN Gate profile changed; retrying same relay with controlled vpn/vpn ===\n")
+        log_handle.flush()
+        write_node_config(config_path, newer)
+        try:
+            proc, auth_mode = start_vpngate_openvpn(config_path, tun_name, log_path, log_handle, timeout)
+            return proc, auth_mode, newer
+        except OpenVPNAuthFailed as second_error:
+            raise RuntimeError(
+                "OpenVPN AUTH_FAILED；已使用 VPN Gate 最新配置对同一节点重试，仍认证失败，"
+                "该节点当前不可用。"
+            ) from second_error
 
 def cleanup_probe_route() -> None:
     subprocess.run(
@@ -751,18 +789,20 @@ def test_one_node(node: dict) -> dict:
     }
 
     try:
-        raw_config_b64 = str(node.get("openvpn_config_b64", ""))
-        config_path.write_text(sanitized_ovpn(raw_config_b64), encoding="utf-8")
-        os.chmod(config_path, 0o600)
         log_handle = log_path.open("w", encoding="utf-8")
-        proc, auth_mode = start_vpngate_openvpn(
+        proc, auth_mode, fresh_node = connect_fresh_vpngate_node(
+            node,
             config_path,
             tun_name,
             log_path,
             log_handle,
             TEST_CONNECT_TIMEOUT,
         )
+        result["node_id"] = fresh_node.get("id") or node_id
+        result["source_ip"] = fresh_node.get("ip") or node.get("ip")
+        result["country_short"] = fresh_node.get("country_short") or node.get("country_short")
         result["evidence"]["openvpn_auth_mode"] = auth_mode
+        result["evidence"]["profile_refreshed_before_connect"] = True
 
         install_probe_route(tun_name)
 
@@ -1208,27 +1248,24 @@ def start_socks_instance(instance_id: str) -> dict:
         socks_log = work_dir / "socks.log"
 
         cached_node = find_cached_node_for_instance(instance)
-        if cached_node and cached_node.get("openvpn_config_b64"):
-            raw_config_b64 = str(cached_node.get("openvpn_config_b64", ""))
-            config_path.write_text(sanitized_ovpn(raw_config_b64), encoding="utf-8")
-            os.chmod(config_path, 0o600)
-            instance["vpngate_auth_required"] = True
-            instance["node_id"] = cached_node.get("id") or instance.get("node_id")
-            instance["source_hostname"] = cached_node.get("hostname") or instance.get("source_hostname")
-        elif "vpngate_auth_required" not in instance:
-            instance["vpngate_auth_required"] = True
-
-        if not config_path.exists():
+        node_identity = cached_node or {
+            "id": instance.get("node_id"),
+            "ip": instance.get("source_ip"),
+            "hostname": instance.get("source_hostname"),
+            "country_short": instance.get("country_short"),
+        }
+        if not (node_identity.get("ip") or node_identity.get("hostname")):
             instance["status"] = "error"
             instance["enabled"] = False
-            instance["last_error"] = "持久化 OpenVPN 配置不存在"
+            instance["last_error"] = "SOCKS5 实例缺少 VPN Gate 节点身份，无法刷新最新配置"
             persist_socks_instance(instance)
             return public_socks_instance(instance)
         try:
             openvpn_handle = openvpn_log.open("a", encoding="utf-8")
             openvpn_handle.write(f"\n=== GateSocks start {datetime.now(timezone.utc).isoformat()} ===\n")
             openvpn_handle.flush()
-            vpn_proc, auth_mode = start_vpngate_openvpn(
+            vpn_proc, auth_mode, fresh_node = connect_fresh_vpngate_node(
+                node_identity,
                 config_path,
                 str(instance["tun_name"]),
                 openvpn_log,
@@ -1236,6 +1273,12 @@ def start_socks_instance(instance_id: str) -> dict:
                 SOCKS_CONNECT_TIMEOUT,
             )
             instance["openvpn_auth_mode"] = auth_mode
+            instance["vpngate_auth_required"] = True
+            instance["node_id"] = fresh_node.get("id") or instance.get("node_id")
+            instance["source_ip"] = fresh_node.get("ip") or instance.get("source_ip")
+            instance["source_hostname"] = fresh_node.get("hostname") or instance.get("source_hostname")
+            instance["country_short"] = fresh_node.get("country_short") or instance.get("country_short")
+            instance["profile_refreshed_at"] = datetime.now(timezone.utc).isoformat()
             SOCKS_RUNTIME[instance_id] = {"openvpn": vpn_proc, "socks": None, "openvpn_log_handle": openvpn_handle, "socks_log_handle": None}
             install_instance_policy(instance)
             socks_handle = socks_log.open("a", encoding="utf-8")
@@ -1703,8 +1746,7 @@ async def create_socks(request: Request):
         work_dir.mkdir(parents=True, exist_ok=False)
         config_path = work_dir / "node.ovpn"
         try:
-            config_path.write_text(sanitized_ovpn(str(node.get("openvpn_config_b64", ""))), encoding="utf-8")
-            os.chmod(config_path, 0o600)
+            write_node_config(config_path, node)
         except Exception as exc:
             shutil.rmtree(work_dir, ignore_errors=True)
             return JSONResponse({"detail": f"OpenVPN 配置准备失败：{exc}"}, status_code=500)
