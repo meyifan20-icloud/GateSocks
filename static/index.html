@@ -6,7 +6,7 @@
   <title>GateSocks</title>
   <link rel="icon" href="/favicon.ico" sizes="any">
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-  <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/app.css?v=0.4.0-dev">
 </head>
 <body>
 <div class="app-shell">
@@ -25,7 +25,7 @@
       <button class="nav-item" data-page="settings">设置</button>
     </nav>
     <div class="sidebar-foot">
-      <span id="version">v0.3.1-dev</span>
+      <span id="version">v0.4.0-dev</span>
       <span class="status-dot"></span> Development
     </div>
   </aside>
@@ -49,7 +49,7 @@
       <div class="stats-grid">
         <article class="stat"><span>SOCKS5 在线</span><strong id="statSocks">0</strong><small>当前可用出口</small></article>
         <article class="stat"><span>OpenVPN 隧道</span><strong id="statTunnels">0</strong><small>已检测 TUN/TAP</small></article>
-        <article class="stat"><span>候选节点</span><strong id="statNodes">0</strong><small>等待节点引擎接入</small></article>
+        <article class="stat"><span>候选节点</span><strong id="statNodes">0</strong><small>VPN Gate 候选资源</small></article>
         <article class="stat"><span>异常</span><strong id="statAlerts">0</strong><small>需要处理的状态</small></article>
       </div>
 
@@ -70,20 +70,21 @@
 
       <article class="panel">
         <div class="panel-head"><div><h2>最近 SOCKS5</h2><p>生成后将在这里显示本地与外部访问信息</p></div><button class="btn primary" data-jump="nodes">选择节点</button></div>
-        <div class="empty">当前还没有 SOCKS5 实例。节点筛选引擎接入后可直接从节点池生成。</div>
+        <div class="empty">当前还没有 SOCKS5 实例。先从节点池选择并完成真实连接测试。</div>
       </article>
     </section>
 
     <section class="page" id="page-nodes">
       <article class="panel">
         <div class="panel-head">
-          <div><h2>节点池</h2><p>候选节点将在后台完成连接、出口、住宅属性、速度与稳定性验证</p></div>
-          <div class="row-actions"><button class="btn ghost">拉取节点</button><button class="btn primary">开始筛选</button></div>
+          <div><h2>节点池</h2><p>已接入 VPN Gate 公益候选池；公布的 Ping/Speed 仅作候选排序，后续仍需由本 VPS 真实连接验证</p></div>
+          <div class="row-actions"><button class="btn ghost" id="refreshNodesBtn">拉取节点</button><button class="btn primary" id="startFilterBtn" disabled title="OpenVPN 实连筛选将在下一步接入">开始实测筛选</button></div>
         </div>
+        <div class="node-meta" id="nodeSourceMeta">正在读取候选节点…</div>
         <div class="filters">
-          <select><option>全部地区</option><option>TW</option><option>US</option><option>JP</option><option>HK</option><option>SG</option></select>
-          <select><option>全部状态</option><option>可用</option><option>测试中</option><option>不可用</option></select>
-          <input placeholder="搜索 IP / ISP / 国家">
+          <select id="countryFilter"><option value="">全部地区</option></select>
+          <select id="nodeStatusFilter"><option value="">全部状态</option><option value="candidate">候选</option><option value="available">可用</option><option value="testing">测试中</option><option value="unavailable">不可用</option></select>
+          <input id="nodeSearch" placeholder="搜索 IP / 主机名 / 国家">
         </div>
         <div class="table-wrap">
           <table>
@@ -137,8 +138,8 @@
 
     <section class="page" id="page-tests">
       <article class="panel">
-        <div class="panel-head"><div><h2>测试记录</h2><p>记录延迟、上下行、出口 IP、住宅判断、稳定性与失败原因</p></div><button class="btn ghost">清理记录</button></div>
-        <div class="empty">暂无测试记录</div>
+        <div class="panel-head"><div><h2>测试记录</h2><p>记录延迟、上下行、出口 IP、住宅判断、稳定性与失败原因</p></div><button class="btn ghost" disabled>清理记录</button></div>
+        <div class="empty">暂无真实连接测试记录</div>
       </article>
     </section>
 
@@ -152,25 +153,40 @@
     <section class="page" id="page-settings">
       <div class="grid-2">
         <article class="panel">
-          <div class="panel-head"><div><h2>端口设置</h2><p>第一版按 RN VPS 已确认的空闲端口规划</p></div></div>
+          <div class="panel-head"><div><h2>端口设置</h2><p>RN VPS 已确认的 GateSocks 端口规划</p></div></div>
           <label class="field"><span>SOCKS5 正式端口池</span><input value="18001-18099" readonly></label>
           <label class="field"><span>测试端口池</span><input value="18100-18149" readonly></label>
           <label class="field"><span>扩展保留</span><input value="18150-18199" readonly></label>
         </article>
         <article class="panel">
-          <div class="panel-head"><div><h2>Web 服务</h2><p>后续由现有 Caddy + Cloudflare Origin Rule 暴露</p></div></div>
+          <div class="panel-head"><div><h2>Web 服务</h2><p>现有 Caddy + Cloudflare Origin Rule 暴露管理面板</p></div></div>
           <label class="field"><span>监听地址</span><input id="webBind" readonly></label>
           <label class="field"><span>监听端口</span><input id="webPort" readonly></label>
           <label class="field"><span>容器网络</span><input value="sublink-worker_default / bridge" readonly></label>
         </article>
       </div>
+
+      <article class="panel">
+        <div class="panel-head"><div><h2>管理员账号</h2><p>可直接在面板修改登录用户名与密码；修改结果持久化在 ./config，不会写入 GitHub</p></div><span class="pill" id="authSource">读取中</span></div>
+        <div class="form-grid">
+          <label class="field"><span>登录用户名</span><input id="settingsUsername" autocomplete="username"></label>
+          <label class="field"><span>当前密码（必填）</span><input id="currentPassword" type="password" autocomplete="current-password"></label>
+          <label class="field"><span>新密码（不修改可留空）</span><input id="newPassword" type="password" autocomplete="new-password"></label>
+          <label class="field"><span>确认新密码</span><input id="confirmPassword" type="password" autocomplete="new-password"></label>
+        </div>
+        <div class="form-actions">
+          <button class="btn primary" id="saveAuthBtn">保存账号设置</button>
+          <span class="form-message" id="authMessage"></span>
+        </div>
+      </article>
+
       <article class="panel notice">
         <strong>开发版说明</strong>
-        <p>当前版本已加入管理面板登录认证与 Session Cookie。节点抓取、真实测速、住宅/风险判断、SOCKS5 创建/认证及自动重连会在下一阶段接入。</p>
+        <p>当前已接入 VPN Gate 候选资源池与面板账号修改。候选节点尚未经过 GateSocks 本 VPS 的 OpenVPN 实连、住宅/风险、上下行与稳定性验证，因此不能直接视为“可用出口”。</p>
       </article>
     </section>
   </main>
 </div>
-<script src="/static/app.js"></script>
+<script src="/static/app.js?v=0.4.0-dev"></script>
 </body>
 </html>

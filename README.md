@@ -2,7 +2,7 @@
 
 GateSocks 是一个面向个人 VPS 的 SOCKS5 出口筛选、验证与管理项目。Web 面板负责节点池、SOCKS5、OpenVPN 隧道、测试记录、日志和设置；OpenVPN 是底层出口隧道，SOCKS5 是主要使用入口。
 
-当前开发版本：`v0.3.1-dev`。
+当前开发版本：`v0.4.0-dev`。
 
 ## Docker image
 
@@ -80,3 +80,11 @@ gatesocks.zhangbao20.ccwu.cc:2096 {
 - 增加 GateSocks 品牌 favicon，并为 `/favicon.ico` 提供兼容入口，消除浏览器 404。
 - 主面板恢复当前用户显示与退出按钮；API 遇到 401 时自动返回登录页。
 - `.env` 与本地环境备份文件加入忽略规则，避免认证密码与 Session Secret 被误提交。
+
+## v0.4.0-dev
+
+- 接入 VPN Gate 官方 iPhone/API 候选节点池；首次打开面板会在缓存为空时自动拉取，也可在“节点池”手动刷新。
+- 候选表中的 Ping/Speed 标记为公益源公布值，不冒充 GateSocks 本 VPS 的真实测速结果；OpenVPN 实连、出口 IP、ISP/ASN、住宅/风险、上传下载与稳定性仍按后续实测阶段处理。
+- 节点缓存持久化到 `./data/vpngate_nodes.json`，OpenVPN 配置数据只保存在后端缓存，不下发到浏览器表格。
+- “设置 → 管理员账号”新增修改用户名/密码；要求输入当前密码，新密码使用 PBKDF2-SHA256 哈希后保存到 `./config/auth.json`，不写入仓库；修改后旧 Session 自动失效并签发当前 Session。
+- Docker 构建增加 Python 语法检查，工作流版本同步到 `v0.4.0-dev`。
