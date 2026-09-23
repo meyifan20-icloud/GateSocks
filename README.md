@@ -2,7 +2,7 @@
 
 GateSocks 是一个面向个人 VPS 的 SOCKS5 出口筛选、验证与管理项目。Web 面板负责节点池、SOCKS5、OpenVPN 隧道、测试记录、日志和设置；OpenVPN 是底层出口隧道，SOCKS5 是主要使用入口。
 
-当前开发版本：`v0.4.5-dev`。
+当前开发版本：`v0.4.6-dev`。
 
 ## Docker image
 
@@ -46,7 +46,7 @@ docker compose up -d
 curl http://127.0.0.1:19080/health
 ```
 
-当前不会把 18001-18199 SOCKS5 端口直接暴露到公网；等用户名/密码认证和防火墙策略接入后再开放。
+正式 SOCKS5 端口池 18001–18099/tcp 会由 Compose 映射到宿主机；只有已生成且正在运行的实例实际监听对应端口，并强制用户名/密码认证。请同时使用 VPS 防火墙限制不需要的来源。
 
 ## Caddy
 
@@ -136,3 +136,12 @@ gatesocks.zhangbao20.ccwu.cc:2096 {
 - SOCKS5 外部访问增加二维码能力：正式实例每条文本信息同时显示同尺寸“复制 / 二维码”按钮，点击二维码弹出扫码窗口。
 - “完整地址”二维码编码完整 SOCKS5 URI，供支持该 URI 的移动代理客户端扫码添加；二维码通过认证后的 POST `/api/qr` 生成 SVG，不把用户名/密码等凭据放进查询字符串。
 - 增加 `qrcode` 依赖与 QR 生成单元测试；SOCKS5 尚未创建实例时仅展示能力说明，不生成虚假二维码。
+
+## v0.4.6-dev
+
+- 实现 SOCKS5 多实例后端：每个实例拥有独立 OpenVPN TUN、SOCKS5 端口、用户名/密码、策略路由表和 socket fwmark；管理面板/Caddy/OpenVPN 控制连接本身不切入实例 VPN。
+- 新增持久化 data/socks_instances.json 与 data/socks/<实例ID>/，容器重启后会恢复此前处于启用状态的实例。
+- 新增创建、启动、停止、重连、重新测试、删除 API；删除实例会终止 SOCKS/OpenVPN 进程、清理策略路由、删除 TUN 和实例配置并释放正式端口，但保留节点池及历史测试记录。
+- 创建实例允许使用候选、已测试或测试失败节点，不以测试状态作为限制；同一节点默认只允许一个实例，避免误操作重复占用端口。
+- 内置认证 SOCKS5 服务采用 Linux SO_MARK 只标记代理上游连接，从而避免把客户端到 SOCKS5 的入站会话回包错误送入 VPN；每个实例的上游连接再按 fwmark 进入自己的 TUN。
+- Compose 映射 18001–18099/tcp 作为正式外部访问端口；GATESOCKS_PUBLIC_HOST 可手工指定外部地址，未设置时尝试从管理网络自动读取 VPS 公网 IPv4。

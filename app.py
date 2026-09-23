@@ -7,6 +7,7 @@ import json
 import os
 import platform
 import re
+import shutil
 import secrets
 import socket
 import statistics
@@ -16,6 +17,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from urllib.parse import quote
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -33,10 +35,13 @@ AUTH_FILE = CONFIG_DIR / "auth.json"
 NODE_CACHE_FILE = DATA_DIR / "vpngate_nodes.json"
 TEST_RESULTS_FILE = DATA_DIR / "test_results.json"
 SELECTED_NODE_FILE = DATA_DIR / "selected_node.json"
+SOCKS_INSTANCES_FILE = DATA_DIR / "socks_instances.json"
+SOCKS_DATA_DIR = DATA_DIR / "socks"
+SOCKS_SERVER_SCRIPT = APP_DIR / "socks_server.py"
 
 BIND = os.getenv("GATESOCKS_BIND", "0.0.0.0")
 PORT = int(os.getenv("GATESOCKS_PORT", "19080"))
-VERSION = os.getenv("GATESOCKS_VERSION", "0.4.5-dev")
+VERSION = os.getenv("GATESOCKS_VERSION", "0.4.6-dev")
 SOCKS_START = int(os.getenv("GATESOCKS_SOCKS_START", "18001"))
 SOCKS_END = int(os.getenv("GATESOCKS_SOCKS_END", "18099"))
 TEST_START = int(os.getenv("GATESOCKS_TEST_START", "18100"))
@@ -57,6 +62,11 @@ TEST_MAX_BATCH = int(os.getenv("GATESOCKS_TEST_MAX_BATCH", "200"))
 TEST_CONNECT_TIMEOUT = int(os.getenv("GATESOCKS_TEST_CONNECT_TIMEOUT", "30"))
 TEST_DOWNLOAD_BYTES = int(os.getenv("GATESOCKS_TEST_DOWNLOAD_BYTES", "5000000"))
 TEST_UPLOAD_BYTES = int(os.getenv("GATESOCKS_TEST_UPLOAD_BYTES", "1048576"))
+SOCKS_CONNECT_TIMEOUT = int(os.getenv("GATESOCKS_SOCKS_CONNECT_TIMEOUT", "35"))
+SOCKS_MARK_BASE = int(os.getenv("GATESOCKS_SOCKS_MARK_BASE", "12000"))
+SOCKS_TABLE_BASE = int(os.getenv("GATESOCKS_SOCKS_TABLE_BASE", "20000"))
+SOCKS_RULE_PRIORITY_BASE = int(os.getenv("GATESOCKS_SOCKS_RULE_PRIORITY_BASE", "21000"))
+PUBLIC_HOST_ENV = os.getenv("GATESOCKS_PUBLIC_HOST", "").strip()
 PROBE_UID = 65534
 PROBE_TABLE = 100
 PROBE_RULE_PRIORITY = 10000
@@ -64,12 +74,16 @@ PBKDF2_ROUNDS = 200_000
 
 CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 DATA_DIR.mkdir(parents=True, exist_ok=True)
+SOCKS_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 AUTH_LOCK = threading.Lock()
 NODE_LOCK = threading.Lock()
 TEST_LOCK = threading.Lock()
 TEST_JOB = {"running": False, "total": 0, "completed": 0, "current_id": None, "started_at": None, "finished_at": None, "last_error": None}
 IP_META_CACHE: dict[str, dict] = {}
+SOCKS_LOCK = threading.RLock()
+SOCKS_RUNTIME: dict[str, dict] = {}
+PUBLIC_HOST_CACHE = {"value": None, "checked_at": 0.0}
 
 DATA_SOURCES = {
     "candidate": {
@@ -752,6 +766,397 @@ def run_test_batch(nodes_to_test: list[dict]) -> None:
             TEST_JOB["finished_at"] = datetime.now(timezone.utc).isoformat()
 
 
+
+def read_socks_instances() -> list[dict]:
+    try:
+        if SOCKS_INSTANCES_FILE.exists():
+            data = json.loads(SOCKS_INSTANCES_FILE.read_text(encoding="utf-8"))
+            if isinstance(data, list):
+                return data
+    except Exception:
+        pass
+    return []
+
+
+def save_socks_instances(items: list[dict]) -> None:
+    atomic_write_json(SOCKS_INSTANCES_FILE, items, private=True)
+
+
+def find_cached_node(node_id: str) -> dict | None:
+    return next((item for item in read_node_cache().get("items", []) if str(item.get("id")) == str(node_id)), None)
+
+
+def latest_node_test(node_id: str) -> dict | None:
+    return next((item for item in read_test_results() if str(item.get("node_id")) == str(node_id)), None)
+
+
+def instance_network_values(port: int) -> dict:
+    slot = int(port) - SOCKS_START + 1
+    if slot < 1 or int(port) > SOCKS_END:
+        raise ValueError("SOCKS5 port is outside the configured pool")
+    return {
+        "tun_name": f"gst{int(port)}",
+        "mark": SOCKS_MARK_BASE + slot,
+        "route_table": SOCKS_TABLE_BASE + slot,
+        "rule_priority": SOCKS_RULE_PRIORITY_BASE + slot,
+    }
+
+
+def build_socks_uri(host: str, port: int, username: str, password: str) -> str:
+    target = str(host).strip()
+    if ":" in target and not target.startswith("["):
+        target = f"[{target}]"
+    return f"socks5://{quote(str(username), safe='')}:{quote(str(password), safe='')}@{target}:{int(port)}"
+
+
+def is_tcp_port_free(port: int) -> bool:
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind(("0.0.0.0", int(port)))
+        return True
+    except OSError:
+        return False
+    finally:
+        sock.close()
+
+
+def allocate_socks_port(items: list[dict] | None = None) -> int:
+    items = items if items is not None else read_socks_instances()
+    reserved = {int(item.get("port", 0)) for item in items if item.get("port")}
+    for port in range(SOCKS_START, SOCKS_END + 1):
+        if port not in reserved and is_tcp_port_free(port):
+            return port
+    raise RuntimeError("SOCKS5 正式端口池已满或端口均被占用")
+
+
+def detect_public_host() -> str:
+    if PUBLIC_HOST_ENV:
+        return PUBLIC_HOST_ENV
+    now = time.time()
+    if PUBLIC_HOST_CACHE.get("value") and now - float(PUBLIC_HOST_CACHE.get("checked_at", 0)) < 3600:
+        return str(PUBLIC_HOST_CACHE["value"])
+    try:
+        req = urllib.request.Request("https://api.ipify.org", headers={"User-Agent": f"GateSocks/{VERSION}"})
+        with urllib.request.urlopen(req, timeout=6) as response:
+            value = response.read().decode("utf-8", errors="replace").strip()
+        if re.fullmatch(r"\d{1,3}(?:\.\d{1,3}){3}", value):
+            PUBLIC_HOST_CACHE["value"] = value
+            PUBLIC_HOST_CACHE["checked_at"] = now
+            return value
+    except Exception:
+        pass
+    return ""
+
+
+def persist_socks_instance(instance: dict) -> None:
+    items = read_socks_instances()
+    replaced = False
+    for index, item in enumerate(items):
+        if item.get("id") == instance.get("id"):
+            items[index] = instance
+            replaced = True
+            break
+    if not replaced:
+        items.append(instance)
+    save_socks_instances(items)
+
+
+def cleanup_instance_policy(instance: dict) -> None:
+    priority = str(instance.get("rule_priority", ""))
+    table = str(instance.get("route_table", ""))
+    if priority:
+        for _ in range(2):
+            proc = subprocess.run(["ip", "rule", "del", "priority", priority], capture_output=True)
+            if proc.returncode != 0:
+                break
+    if table:
+        subprocess.run(["ip", "route", "flush", "table", table], capture_output=True)
+
+
+def install_instance_policy(instance: dict) -> None:
+    cleanup_instance_policy(instance)
+    subprocess.run(
+        ["ip", "route", "replace", "default", "dev", str(instance["tun_name"]), "table", str(instance["route_table"])],
+        check=True, capture_output=True, text=True,
+    )
+    subprocess.run(
+        ["ip", "rule", "add", "priority", str(instance["rule_priority"]), "fwmark", str(instance["mark"]), "lookup", str(instance["route_table"])],
+        check=True, capture_output=True, text=True,
+    )
+
+
+def terminate_process(proc: subprocess.Popen | None, timeout: int = 4) -> None:
+    if not proc or proc.poll() is not None:
+        return
+    proc.terminate()
+    try:
+        proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        try:
+            proc.wait(timeout=2)
+        except Exception:
+            pass
+
+
+def cleanup_instance_runtime(instance: dict) -> None:
+    runtime = SOCKS_RUNTIME.pop(str(instance.get("id")), None)
+    if runtime:
+        terminate_process(runtime.get("socks"))
+        terminate_process(runtime.get("openvpn"))
+        for key in ("socks_log_handle", "openvpn_log_handle"):
+            handle = runtime.get(key)
+            try:
+                if handle:
+                    handle.close()
+            except Exception:
+                pass
+    cleanup_instance_policy(instance)
+    tun_name = str(instance.get("tun_name", ""))
+    if tun_name:
+        subprocess.run(["ip", "link", "del", tun_name], capture_output=True)
+
+
+def wait_openvpn_ready(proc: subprocess.Popen, log_path: Path, tun_name: str) -> None:
+    deadline = time.time() + SOCKS_CONNECT_TIMEOUT
+    while time.time() < deadline:
+        if proc.poll() is not None:
+            break
+        try:
+            log_text = log_path.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            log_text = ""
+        if "Initialization Sequence Completed" in log_text and Path(f"/sys/class/net/{tun_name}").exists():
+            return
+        time.sleep(0.5)
+    try:
+        tail = log_path.read_text(encoding="utf-8", errors="replace")[-900:]
+    except Exception:
+        tail = ""
+    raise RuntimeError("OpenVPN 未建立长期隧道：" + tail.replace("\n", " ")[-650:])
+
+
+def wait_socks_listener(proc: subprocess.Popen, port: int) -> None:
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        if proc.poll() is not None:
+            raise RuntimeError("SOCKS5 进程启动后立即退出")
+        try:
+            with socket.create_connection(("127.0.0.1", int(port)), timeout=0.4):
+                return
+        except OSError:
+            time.sleep(0.2)
+    raise RuntimeError("SOCKS5 监听端口未就绪")
+
+
+def proxy_curl(instance: dict, args: list[str], timeout: int = 18, input_bytes: bytes | None = None) -> str:
+    cmd = [
+        "curl", "-4", "-sS", "--fail",
+        "--connect-timeout", "6",
+        "--max-time", str(timeout),
+        "--socks5-hostname", f"127.0.0.1:{int(instance['port'])}",
+        "--proxy-user", f"{instance['username']}:{instance['password']}",
+    ] + args
+    proc = subprocess.run(cmd, input=input_bytes, capture_output=True, timeout=timeout + 5)
+    stdout = proc.stdout.decode("utf-8", errors="replace")
+    stderr = proc.stderr.decode("utf-8", errors="replace")
+    if proc.returncode != 0:
+        raise RuntimeError((stderr or stdout or "SOCKS5 curl failed").strip()[-300:])
+    return stdout.strip()
+
+
+def probe_socks_instance(instance: dict, full: bool = False) -> dict:
+    exit_ip = proxy_curl(instance, ["https://api.ipify.org"], timeout=14).strip()
+    if not re.fullmatch(r"\d{1,3}(?:\.\d{1,3}){3}", exit_ip):
+        raise RuntimeError("SOCKS5 已监听，但无法确认公网出口 IP")
+    result = {
+        "tested_at": datetime.now(timezone.utc).isoformat(),
+        "exit_ip": exit_ip,
+        "latency_ms": None,
+        "download_mbps": None,
+        "upload_mbps": None,
+    }
+    if full:
+        try:
+            seconds = float(proxy_curl(instance, ["-o", "/dev/null", "-w", "%{time_appconnect}", "https://api.ipify.org"], timeout=14))
+            result["latency_ms"] = round(seconds * 1000, 1)
+        except Exception:
+            pass
+        try:
+            speed = float(proxy_curl(instance, ["-o", "/dev/null", "-w", "%{speed_download}", "https://speed.cloudflare.com/__down?bytes=1000000"], timeout=18))
+            result["download_mbps"] = round(speed * 8 / 1_000_000, 2)
+        except Exception:
+            pass
+        try:
+            speed = float(proxy_curl(
+                instance,
+                ["-X", "POST", "--data-binary", "@-", "-o", "/dev/null", "-w", "%{speed_upload}", "https://speed.cloudflare.com/__up"],
+                timeout=18,
+                input_bytes=b"0" * 262144,
+            ))
+            result["upload_mbps"] = round(speed * 8 / 1_000_000, 2)
+        except Exception:
+            pass
+    return result
+
+
+def runtime_active(instance_id: str) -> bool:
+    runtime = SOCKS_RUNTIME.get(str(instance_id))
+    if not runtime:
+        return False
+    vpn = runtime.get("openvpn")
+    socks_proc = runtime.get("socks")
+    return bool(vpn and socks_proc and vpn.poll() is None and socks_proc.poll() is None)
+
+
+def public_socks_instance(instance: dict) -> dict:
+    item = {k: v for k, v in instance.items() if k not in {"config_path"}}
+    host = detect_public_host()
+    item["runtime_active"] = runtime_active(str(instance.get("id")))
+    if item.get("status") == "online" and not item["runtime_active"]:
+        item["status"] = "starting" if item.get("enabled") else "stopped"
+    item["local_host"] = "127.0.0.1"
+    item["host"] = host
+    item["address"] = host
+    item["local_uri"] = build_socks_uri("127.0.0.1", item["port"], item["username"], item["password"])
+    item["url"] = build_socks_uri(host, item["port"], item["username"], item["password"]) if host else ""
+    return item
+
+
+def start_socks_instance(instance_id: str) -> dict:
+    with SOCKS_LOCK:
+        items = read_socks_instances()
+        instance = next((item for item in items if item.get("id") == instance_id), None)
+        if not instance:
+            raise KeyError("SOCKS5 实例不存在")
+        cleanup_instance_runtime(instance)
+        instance["status"] = "starting"
+        instance["enabled"] = True
+        instance["last_error"] = None
+        persist_socks_instance(instance)
+        work_dir = SOCKS_DATA_DIR / instance_id
+        config_path = work_dir / "node.ovpn"
+        openvpn_log = work_dir / "openvpn.log"
+        socks_log = work_dir / "socks.log"
+        if not config_path.exists():
+            instance["status"] = "error"
+            instance["enabled"] = False
+            instance["last_error"] = "持久化 OpenVPN 配置不存在"
+            persist_socks_instance(instance)
+            return public_socks_instance(instance)
+        try:
+            openvpn_handle = openvpn_log.open("a", encoding="utf-8")
+            openvpn_handle.write(f"\n=== GateSocks start {datetime.now(timezone.utc).isoformat()} ===\n")
+            openvpn_handle.flush()
+            vpn_proc = subprocess.Popen(build_openvpn_command(config_path, str(instance["tun_name"])), stdout=openvpn_handle, stderr=subprocess.STDOUT, text=True)
+            SOCKS_RUNTIME[instance_id] = {"openvpn": vpn_proc, "socks": None, "openvpn_log_handle": openvpn_handle, "socks_log_handle": None}
+            wait_openvpn_ready(vpn_proc, openvpn_log, str(instance["tun_name"]))
+            install_instance_policy(instance)
+            socks_handle = socks_log.open("a", encoding="utf-8")
+            socks_handle.write(f"\n=== GateSocks start {datetime.now(timezone.utc).isoformat()} ===\n")
+            socks_handle.flush()
+            socks_proc = subprocess.Popen(
+                ["python", str(SOCKS_SERVER_SCRIPT), "--bind", "0.0.0.0", "--port", str(instance["port"]), "--username", str(instance["username"]), "--password", str(instance["password"]), "--mark", str(instance["mark"])],
+                stdout=socks_handle, stderr=subprocess.STDOUT, text=True,
+            )
+            SOCKS_RUNTIME[instance_id]["socks"] = socks_proc
+            SOCKS_RUNTIME[instance_id]["socks_log_handle"] = socks_handle
+            wait_socks_listener(socks_proc, int(instance["port"]))
+            probe = probe_socks_instance(instance, full=False)
+            instance["exit_ip"] = probe["exit_ip"]
+            meta = ip_metadata(probe["exit_ip"])
+            if meta:
+                instance["isp"] = meta.get("isp") or meta.get("org")
+                instance["asn"] = meta.get("as") or meta.get("asname")
+            instance["status"] = "online"
+            instance["enabled"] = True
+            instance["started_at"] = datetime.now(timezone.utc).isoformat()
+            instance["last_probe"] = probe
+            instance["last_error"] = None
+        except Exception as exc:
+            cleanup_instance_runtime(instance)
+            instance["status"] = "error"
+            instance["enabled"] = False
+            instance["last_error"] = str(exc)[-900:]
+        persist_socks_instance(instance)
+        return public_socks_instance(instance)
+
+
+def stop_socks_instance(instance_id: str) -> dict:
+    with SOCKS_LOCK:
+        items = read_socks_instances()
+        instance = next((item for item in items if item.get("id") == instance_id), None)
+        if not instance:
+            raise KeyError("SOCKS5 实例不存在")
+        cleanup_instance_runtime(instance)
+        instance["status"] = "stopped"
+        instance["enabled"] = False
+        instance["stopped_at"] = datetime.now(timezone.utc).isoformat()
+        persist_socks_instance(instance)
+        return public_socks_instance(instance)
+
+
+def retest_socks_instance(instance_id: str) -> dict:
+    with SOCKS_LOCK:
+        items = read_socks_instances()
+        instance = next((item for item in items if item.get("id") == instance_id), None)
+        if not instance:
+            raise KeyError("SOCKS5 实例不存在")
+        if not runtime_active(instance_id):
+            raise RuntimeError("实例当前未运行，请先启动 SOCKS5")
+        probe = probe_socks_instance(instance, full=True)
+        instance["exit_ip"] = probe["exit_ip"]
+        instance["last_probe"] = probe
+        meta = ip_metadata(probe["exit_ip"])
+        if meta:
+            instance["isp"] = meta.get("isp") or meta.get("org")
+            instance["asn"] = meta.get("as") or meta.get("asname")
+        persist_socks_instance(instance)
+        return public_socks_instance(instance)
+
+
+def delete_socks_instance(instance_id: str) -> None:
+    if not re.fullmatch(r"[a-f0-9]{12}", str(instance_id)):
+        raise KeyError("SOCKS5 实例不存在")
+    with SOCKS_LOCK:
+        items = read_socks_instances()
+        instance = next((item for item in items if item.get("id") == instance_id), None)
+        if not instance:
+            raise KeyError("SOCKS5 实例不存在")
+        cleanup_instance_runtime(instance)
+        save_socks_instances([item for item in items if item.get("id") != instance_id])
+        shutil.rmtree(SOCKS_DATA_DIR / instance_id, ignore_errors=True)
+
+
+def restore_enabled_socks_instances() -> None:
+    for item in read_socks_instances():
+        if item.get("enabled"):
+            try:
+                start_socks_instance(str(item["id"]))
+            except Exception:
+                pass
+
+
+def stop_all_socks_runtime() -> None:
+    with SOCKS_LOCK:
+        for instance in read_socks_instances():
+            try:
+                cleanup_instance_runtime(instance)
+            except Exception:
+                pass
+
+
+@app.on_event("startup")
+def restore_socks_on_startup():
+    threading.Thread(target=restore_enabled_socks_instances, daemon=True).start()
+
+
+@app.on_event("shutdown")
+def cleanup_socks_on_shutdown():
+    stop_all_socks_runtime()
+
+
 @app.middleware("http")
 async def require_auth(request: Request, call_next):
     path = request.url.path
@@ -1046,7 +1451,123 @@ async def qr_code(request: Request):
 
 @app.get("/api/socks")
 def socks():
-    return {"items": [], "port_pool": {"start": SOCKS_START, "end": SOCKS_END}, "qr_supported": True, "message": "尚未生成 SOCKS5 实例。"}
+    with SOCKS_LOCK:
+        items = [public_socks_instance(item) for item in read_socks_instances()]
+    return {
+        "items": items,
+        "count": len(items),
+        "port_pool": {"start": SOCKS_START, "end": SOCKS_END},
+        "qr_supported": True,
+        "public_host": detect_public_host(),
+        "message": None if items else "尚未生成 SOCKS5 实例。",
+    }
+
+
+@app.post("/api/socks")
+async def create_socks(request: Request):
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    node_id = str(data.get("node_id") or read_selected_node().get("node_id") or "").strip()
+    if not node_id:
+        return JSONResponse({"detail": "请先在节点池点击一个 IP，设置为待生成节点"}, status_code=400)
+    node = find_cached_node(node_id)
+    if not node:
+        return JSONResponse({"detail": "待生成节点已不在当前候选池，请重新选择 IP"}, status_code=404)
+    with SOCKS_LOCK:
+        items = read_socks_instances()
+        duplicate = next((item for item in items if str(item.get("node_id")) == node_id), None)
+        if duplicate:
+            return JSONResponse({"detail": f"该节点已经生成 SOCKS5 实例：{duplicate.get('name') or duplicate.get('id')}"}, status_code=409)
+        try:
+            port = allocate_socks_port(items)
+        except RuntimeError as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=409)
+        instance_id = secrets.token_hex(6)
+        network = instance_network_values(port)
+        work_dir = SOCKS_DATA_DIR / instance_id
+        work_dir.mkdir(parents=True, exist_ok=False)
+        config_path = work_dir / "node.ovpn"
+        try:
+            config_path.write_text(sanitized_ovpn(str(node.get("openvpn_config_b64", ""))), encoding="utf-8")
+            os.chmod(config_path, 0o600)
+        except Exception as exc:
+            shutil.rmtree(work_dir, ignore_errors=True)
+            return JSONResponse({"detail": f"OpenVPN 配置准备失败：{exc}"}, status_code=500)
+        previous_test = latest_node_test(node_id) or {}
+        instance = {
+            "id": instance_id,
+            "name": f"{node.get('country_short') or 'NODE'}-{port}",
+            "node_id": node_id,
+            "country_short": node.get("country_short"),
+            "source_ip": node.get("ip"),
+            "source_hostname": node.get("hostname"),
+            "port": port,
+            "username": "gs_" + secrets.token_hex(4),
+            "password": secrets.token_urlsafe(18),
+            "status": "created",
+            "enabled": True,
+            "exit_ip": previous_test.get("exit_ip"),
+            "isp": previous_test.get("isp"),
+            "asn": previous_test.get("asn"),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "started_at": None,
+            "stopped_at": None,
+            "last_error": None,
+            "last_probe": None,
+            "config_path": str(config_path),
+            **network,
+        }
+        items.append(instance)
+        save_socks_instances(items)
+    item = start_socks_instance(instance_id)
+    return JSONResponse({"ok": item.get("status") == "online", "instance": item}, status_code=201)
+
+
+@app.post("/api/socks/{instance_id}/start")
+def start_socks(instance_id: str):
+    try:
+        return {"ok": True, "instance": start_socks_instance(instance_id)}
+    except KeyError as exc:
+        return JSONResponse({"detail": str(exc).strip("'")}, status_code=404)
+
+
+@app.post("/api/socks/{instance_id}/stop")
+def stop_socks(instance_id: str):
+    try:
+        return {"ok": True, "instance": stop_socks_instance(instance_id)}
+    except KeyError as exc:
+        return JSONResponse({"detail": str(exc).strip("'")}, status_code=404)
+
+
+@app.post("/api/socks/{instance_id}/reconnect")
+def reconnect_socks(instance_id: str):
+    try:
+        stop_socks_instance(instance_id)
+        return {"ok": True, "instance": start_socks_instance(instance_id)}
+    except KeyError as exc:
+        return JSONResponse({"detail": str(exc).strip("'")}, status_code=404)
+
+
+@app.post("/api/socks/{instance_id}/test")
+def test_socks(instance_id: str):
+    try:
+        return {"ok": True, "instance": retest_socks_instance(instance_id)}
+    except KeyError as exc:
+        return JSONResponse({"detail": str(exc).strip("'")}, status_code=404)
+    except RuntimeError as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=409)
+
+
+@app.delete("/api/socks/{instance_id}")
+def delete_socks(instance_id: str):
+    try:
+        delete_socks_instance(instance_id)
+        return {"ok": True, "message": "SOCKS5 实例已删除，端口、隧道、策略路由和实例配置已释放；节点池与历史测试记录保留。"}
+    except KeyError as exc:
+        return JSONResponse({"detail": str(exc).strip("'")}, status_code=404)
+
 
 
 @app.get("/api/openvpn")
@@ -1081,6 +1602,8 @@ def settings():
             "tun_device": "/dev/net/tun",
             "network_mode": "docker-bridge",
             "caddy_network": os.getenv("GATESOCKS_CADDY_NETWORK", "sublink-worker_default"),
+            "socks_routing": "socket-fwmark-policy-routing",
+            "public_host": detect_public_host(),
         },
         "nodes": {
             "source": "VPN Gate",

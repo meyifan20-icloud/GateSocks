@@ -54,6 +54,20 @@ CERTDATA
         with self.assertRaises(ValueError):
             app.build_qr_svg("")
 
+    def test_socks_instance_network_values(self):
+        values = app.instance_network_values(app.SOCKS_START)
+        self.assertEqual(values["tun_name"], f"gst{app.SOCKS_START}")
+        self.assertEqual(values["mark"], app.SOCKS_MARK_BASE + 1)
+        self.assertEqual(values["route_table"], app.SOCKS_TABLE_BASE + 1)
+
+    def test_socks_uri_encodes_credentials(self):
+        uri = app.build_socks_uri("203.0.113.10", 18001, "u ser", "p@ss")
+        self.assertEqual(uri, "socks5://u%20ser:p%40ss@203.0.113.10:18001")
+
+    def test_socks_uri_brackets_ipv6(self):
+        uri = app.build_socks_uri("2001:db8::1", 18001, "u", "p")
+        self.assertEqual(uri, "socks5://u:p@[2001:db8::1]:18001")
+
 
 if __name__ == "__main__":
     unittest.main()
