@@ -167,15 +167,30 @@ def tun_interfaces() -> list[dict]:
         if not match:
             continue
         name = match.group(1)
-        # GateSocks permanent tunnels use gst<port>; temporary tests use tun-gstest*.
-        # Keep generic tun/tap support for compatibility with existing/OpenVPN-created devices.
-        if name.startswith(("gst", "tun", "tap")):
-            result.append({
-                "name": name,
-                "state": "UP" if "state UP" in line or ("<" in line and "UP" in line.split(">", 1)[0]) else "UNKNOWN",
-                "raw": line,
-            })
+        if re.fullmatch(r"gst\d+", name):
+            kind = "instance"
+        elif name.startswith("tun-gstest"):
+            kind = "test"
+        elif name.startswith(("tun", "tap")):
+            kind = "other"
+        else:
+            continue
+        result.append({
+            "name": name,
+            "kind": kind,
+            "state": "UP" if "state UP" in line or ("<" in line and "UP" in line.split(">", 1)[0]) else "UNKNOWN",
+            "raw": line,
+        })
     return result
+
+
+def tunnel_groups(tunnels: list[dict] | None = None) -> dict[str, list[dict]]:
+    tunnels = tunnels if tunnels is not None else tun_interfaces()
+    return {
+        "instance": [item for item in tunnels if item.get("kind") == "instance"],
+        "test": [item for item in tunnels if item.get("kind") == "test"],
+        "other": [item for item in tunnels if item.get("kind") == "other"],
+    }
 
 
 def b64e(raw: bytes) -> str:
@@ -1145,12 +1160,20 @@ def runtime_active(instance_id: str) -> bool:
     return bool(vpn and socks_proc and vpn.poll() is None and socks_proc.poll() is None)
 
 
+def effective_instance_status(instance: dict) -> str:
+    if runtime_active(str(instance.get("id"))):
+        return "online"
+    if instance.get("last_error"):
+        return "error"
+    return "starting" if instance.get("enabled") else "stopped"
+
+
 def public_socks_instance(instance: dict) -> dict:
     item = {k: v for k, v in instance.items() if k not in {"config_path"}}
     host = detect_public_host()
     item["runtime_active"] = runtime_active(str(instance.get("id")))
-    if item.get("status") == "online" and not item["runtime_active"]:
-        item["status"] = "starting" if item.get("enabled") else "stopped"
+    item["desired_enabled"] = bool(instance.get("enabled"))
+    item["status"] = effective_instance_status(instance)
     item["local_host"] = "127.0.0.1"
     item["host"] = host
     item["address"] = host
@@ -1450,6 +1473,8 @@ async def update_auth(request: Request):
 @app.get("/api/status")
 def status():
     tunnels = tun_interfaces()
+    groups = tunnel_groups(tunnels)
+    instances = read_socks_instances()
     node_cache = read_node_cache()
     return {
         "service": "GateSocks",
@@ -1459,10 +1484,12 @@ def status():
         "python": platform.python_version(),
         "openvpn": openvpn_version(),
         "tun_present": os.path.exists("/dev/net/tun"),
-        "tunnel_count": len(tunnels),
-        "socks_online": sum(1 for item in read_socks_instances() if runtime_active(str(item.get("id")))),
+        "tunnel_count": len(groups["instance"]),
+        "test_tunnel_count": len(groups["test"]),
+        "other_tunnel_count": len(groups["other"]),
+        "socks_online": sum(1 for item in instances if runtime_active(str(item.get("id")))),
         "candidate_nodes": len(node_cache.get("items", [])),
-        "alerts": sum(1 for item in read_socks_instances() if item.get("status") == "error"),
+        "alerts": sum(1 for item in instances if effective_instance_status(item) == "error"),
         "bind": BIND,
         "port": PORT,
     }
@@ -1748,7 +1775,19 @@ def delete_socks(instance_id: str):
 
 @app.get("/api/openvpn")
 def openvpn():
-    return {"version": openvpn_version(), "tun_present": os.path.exists("/dev/net/tun"), "tunnels": tun_interfaces()}
+    tunnels = tun_interfaces()
+    groups = tunnel_groups(tunnels)
+    return {
+        "version": openvpn_version(),
+        "tun_present": os.path.exists("/dev/net/tun"),
+        "tunnels": tunnels,
+        "instance_tunnels": groups["instance"],
+        "test_tunnels": groups["test"],
+        "other_tunnels": groups["other"],
+        "instance_count": len(groups["instance"]),
+        "test_count": len(groups["test"]),
+        "other_count": len(groups["other"]),
+    }
 
 
 @app.get("/api/tests")
@@ -1777,7 +1816,6 @@ def settings():
             "openvpn": True,
             "tun_device": "/dev/net/tun",
             "network_mode": "docker-bridge",
-            "caddy_network": os.getenv("GATESOCKS_CADDY_NETWORK", "sublink-worker_default"),
             "socks_routing": "SO_BINDTODEVICE + oif policy routing",
             "public_host": detect_public_host(),
         },

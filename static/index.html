@@ -61,8 +61,8 @@
         <article class="panel">
           <div class="panel-head"><div><h2>端口规划</h2><p>当前 GateSocks 默认端口池</p></div></div>
           <div class="port-plan">
-            <div><strong>18001–18099</strong><span>正式 SOCKS5 出口</span></div>
-            <div><strong>18100–18149</strong><span>节点测试 / 验证</span></div>
+            <div><strong id="dashboardSocksPool">读取中</strong><span>正式 SOCKS5 出口</span></div>
+            <div><strong id="dashboardTestPool">读取中</strong><span>节点测试 / 验证</span></div>
             <div><strong>18150–18199</strong><span>保留扩展</span></div>
           </div>
         </article>
@@ -136,8 +136,8 @@
       <div class="grid-2">
         <article class="panel">
           <div class="panel-head"><div><h2>端口设置</h2><p>RN VPS 已确认的 GateSocks 端口规划</p></div></div>
-          <label class="field"><span>SOCKS5 正式端口池</span><input value="18001-18099" readonly></label>
-          <label class="field"><span>测试端口池</span><input value="18100-18149" readonly></label>
+          <label class="field"><span>SOCKS5 正式端口池</span><input id="settingsSocksPool" value="读取中" readonly></label>
+          <label class="field"><span>测试端口池</span><input id="settingsTestPool" value="读取中" readonly></label>
           <label class="field"><span>扩展保留</span><input value="18150-18199" readonly></label>
         </article>
         <article class="panel">

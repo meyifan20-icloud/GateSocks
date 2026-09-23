@@ -634,7 +634,7 @@ async function loadOpenVPN(){
   try{
     const o=await getJson("/api/openvpn");
     const info=qs("#openvpnInfo"); info.innerHTML="";
-    [["OpenVPN",o.version],["TUN 设备",o.tun_present?"可用":"不可用"],["当前隧道",o.tunnels.length]].forEach(([a,b])=>info.appendChild(kv(a,b)));
+    [["OpenVPN",o.version],["TUN 设备",o.tun_present?"可用":"不可用"],["正式实例隧道",o.instance_count],["临时测试隧道",o.test_count],["其他 TUN/TAP",o.other_count]].forEach(([a,b])=>info.appendChild(kv(a,b)));
     qs("#tunBadge").textContent=o.tun_present?"TUN 可用":"TUN 不可用";
     qs("#tunBadge").className="pill "+(o.tun_present?"ok":"");
     const list=qs("#tunnelList"); list.innerHTML="";
@@ -644,7 +644,7 @@ async function loadOpenVPN(){
       const head=document.createElement("div"); head.className="proxy-head";
       const left=document.createElement("div");
       const strong=document.createElement("strong"); strong.textContent=t.name;
-      const span=document.createElement("span"); span.textContent="OpenVPN/TUN interface";
+      const span=document.createElement("span"); span.textContent=t.kind==="instance"?"正式 SOCKS5 出口":t.kind==="test"?"临时节点测试":"其他 TUN/TAP";
       left.append(strong,span);
       const state=document.createElement("span"); state.className="pill ok"; state.textContent=t.state;
       head.append(left,state); d.appendChild(head); list.appendChild(d);
@@ -657,6 +657,12 @@ async function loadSettings(){
     const s=await getJson("/api/settings");
     qs("#webBind").value=s.web.bind;
     qs("#webPort").value=s.web.port;
+    const socksPool=s.socks_port_pool.start+"–"+s.socks_port_pool.end;
+    const testPool=s.test_port_pool.start+"–"+s.test_port_pool.end;
+    if(qs("#dashboardSocksPool")) qs("#dashboardSocksPool").textContent=socksPool;
+    if(qs("#dashboardTestPool")) qs("#dashboardTestPool").textContent=testPool;
+    if(qs("#settingsSocksPool")) qs("#settingsSocksPool").value=s.socks_port_pool.start+"-"+s.socks_port_pool.end;
+    if(qs("#settingsTestPool")) qs("#settingsTestPool").value=s.test_port_pool.start+"-"+s.test_port_pool.end;
     if(qs("#settingsUsername")) qs("#settingsUsername").value=s.auth.username||"";
     if(qs("#authSource")) qs("#authSource").textContent=s.auth.source==="panel"?"面板持久化":"环境变量";
   }catch(e){}

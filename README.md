@@ -211,3 +211,13 @@ gatesocks.zhangbao20.ccwu.cc:2096 {
 - HTML、静态资源和版本/状态接口增加 no-store/no-cache 响应头，避免 latest-dev 升级后浏览器继续显示旧前端。
 - 修复 OpenVPN 隧道统计：正式实例的 `gst<端口>` 现在与 `tun*`/`tap*` 一样纳入隧道计数；一个在线 SOCKS5 实例对应的 `gst18001` 不再被错误显示为 0 条隧道。
 - CI 增加版本一致性与 Compose 防回归检查，阻止未来再次把 `GATESOCKS_VERSION` 写回 Compose。
+
+
+## v0.4.14-dev
+
+- 将运行状态和配置按正式功能重新收口：SOCKS5 的实际在线状态以当前 OpenVPN/SOCKS 子进程运行态为准，持久化 enabled 只表示期望恢复运行，不再把旧 status 字段当作在线真源。
+- OpenVPN 隧道按用途分类：gst<端口> 为正式 SOCKS5 实例隧道，tun-gstest* 为临时节点测试，其他 tun/tap 单独列出；仪表盘“OpenVPN 隧道”只统计正式实例，测试时不再虚增正式出口数量。
+- /api/openvpn 同时返回正式、测试、其他隧道及各自计数，OpenVPN 页面明确标注每条隧道用途。
+- 仪表盘和设置页的正式/测试端口池改为从 /api/settings 动态读取，删除前端对 18001–18099、18100–18149 的重复硬编码。
+- 设置 API 不再重复声明 Caddy Docker 网络名称；部署网络仍由 Compose/SUBLINK_NETWORK 负责，应用只报告自身实际运行配置。
+- 增加隧道分类、运行态真源和端口 UI 防回归测试。

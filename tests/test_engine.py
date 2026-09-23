@@ -149,6 +149,27 @@ remote 203.0.113.10 443
         with patch.object(app, "run", return_value=sample):
             names = [item["name"] for item in app.tun_interfaces()]
         self.assertEqual(names, ["gst18001", "tun-gstest0"])
+        groups = app.tunnel_groups(app.tun_interfaces())
+        self.assertEqual([item["name"] for item in groups["instance"]], ["gst18001"])
+        self.assertEqual([item["name"] for item in groups["test"]], ["tun-gstest0"])
+        self.assertEqual(groups["other"], [])
+
+    def test_effective_instance_status_uses_runtime_as_truth(self):
+        instance = {"id": "abc", "enabled": True, "status": "online", "last_error": None}
+        with patch.object(app, "runtime_active", return_value=False):
+            self.assertEqual(app.effective_instance_status(instance), "starting")
+        instance["last_error"] = "boom"
+        with patch.object(app, "runtime_active", return_value=False):
+            self.assertEqual(app.effective_instance_status(instance), "error")
+        with patch.object(app, "runtime_active", return_value=True):
+            self.assertEqual(app.effective_instance_status(instance), "online")
+
+    def test_port_plan_ui_is_not_hardcoded(self):
+        html = Path("static/index.html").read_text(encoding="utf-8")
+        js = Path("static/app.js").read_text(encoding="utf-8")
+        self.assertIn('id="dashboardSocksPool"', html)
+        self.assertIn('id="settingsSocksPool"', html)
+        self.assertIn("s.socks_port_pool.start", js)
 
 
 
