@@ -2,7 +2,7 @@
 
 GateSocks 是一个面向个人 VPS 的 SOCKS5 出口筛选、验证与管理项目。Web 面板负责节点池、SOCKS5、OpenVPN 隧道、测试记录、日志和设置；OpenVPN 是底层出口隧道，SOCKS5 是主要使用入口。
 
-当前开发版本：`v0.4.10-dev`。
+当前开发版本：`v0.4.11-dev`。
 
 ## Docker image
 
@@ -180,3 +180,14 @@ gatesocks.zhangbao20.ccwu.cc:2096 {
 - 对不要求认证的配置恢复“无 `--auth-user-pass`”连接路径，避免服务器在本来不需要用户名密码时因被强制提交凭据而返回 `AUTH_FAILED`。
 - 临时节点实测和长期 SOCKS5 实例统一使用上述条件认证逻辑；长期实例启动/重连时会优先从当前节点缓存重新生成受控 OpenVPN 配置，并同步认证需求。
 - 兼容 v0.4.8/v0.4.9 已生成实例：升级后无需删除实例；“重新连接”会自动应用新的条件认证与上游兼容参数。
+
+
+## v0.4.11-dev
+
+- 连接层改为参考已实测可用的 a6216abcd/Free-Residential-IP-Proxy-Controller：VPN Gate 首次连接固定使用受控 `vpn/vpn` 认证文件、`pull-filter ignore route-ipv6`、`pull-filter ignore ifconfig-ipv6`、`route-nopull`、10 秒 connect-timeout 与单次重试。
+- OpenVPN 密码套件补齐参考项目的 `CHACHA20-POLY1305` 与 `--data-ciphers-fallback AES-128-CBC`，兼容 VPN Gate / SoftEther 的旧 CBC 节点。
+- 为兼容 GateSocks 早期实测中“无认证可以连接、强制 vpn/vpn 却 AUTH_FAILED”的节点：仅当首次 vpn/vpn 明确收到服务端 `AUTH_FAILED` 时，自动清理失败 TUN 并再进行一次无认证回退；其他错误不盲目重试。
+- SOCKS5 出口从 SO_MARK/fwmark 改为参考项目的 Linux `SO_BINDTODEVICE`：每个实例的上游 socket 直接绑定自己的 `gst<端口>` TUN。
+- 每个实例的策略路由同步改为 `ip rule oif <tun> lookup <table>` + 独立默认路由表，与绑定设备的 socket 配合，不再依赖 fwmark。
+- 临时节点实测和正式 SOCKS5 长期隧道共用同一套 OpenVPN 启动/认证回退逻辑；实测记录额外记录实际采用的 OpenVPN 认证模式。
+- 现有实例无需删除重建；升级后“重新连接”即可迁移到 SO_BINDTODEVICE 与新 OpenVPN 连接逻辑。

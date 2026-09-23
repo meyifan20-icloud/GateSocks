@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 
 import app
+import socks_server
 
 
 class EngineTests(unittest.TestCase):
@@ -36,9 +37,10 @@ CERTDATA
         self.assertIn("--disable-dco", joined)
         self.assertIn("--route-nopull", joined)
         self.assertIn("--pull-filter ignore route-ipv6", joined)
-        self.assertIn("--connect-timeout 15", joined)
+        self.assertIn("--connect-timeout 10", joined)
         self.assertNotIn("--auth-user-pass", joined)
-        self.assertIn("AES-128-CBC", joined)
+        self.assertIn("--data-ciphers-fallback AES-128-CBC", joined)
+        self.assertIn("CHACHA20-POLY1305", joined)
         self.assertNotIn("--hand-window", joined)
 
     def test_ip_intel_classification(self):
@@ -60,7 +62,6 @@ CERTDATA
     def test_socks_instance_network_values(self):
         values = app.instance_network_values(app.SOCKS_START)
         self.assertEqual(values["tun_name"], f"gst{app.SOCKS_START}")
-        self.assertEqual(values["mark"], app.SOCKS_MARK_BASE + 1)
         self.assertEqual(values["route_table"], app.SOCKS_TABLE_BASE + 1)
 
     def test_socks_uri_encodes_credentials(self):
@@ -100,6 +101,33 @@ remote 203.0.113.10 443
         with_auth = "client\nauth-user-pass\nremote 203.0.113.10 443\n"
         self.assertFalse(app.vpngate_profile_requests_auth(base64.b64encode(no_auth.encode()).decode()))
         self.assertTrue(app.vpngate_profile_requests_auth(base64.b64encode(with_auth.encode()).decode()))
+
+    def test_socks_server_binds_outbound_socket_to_tun(self):
+        class FakeSocket:
+            def __init__(self):
+                self.calls = []
+            def setsockopt(self, *args):
+                self.calls.append(args)
+
+        sock = FakeSocket()
+        socks_server.bind_socket_to_interface(sock, "gst18001")
+        self.assertTrue(sock.calls)
+        level, option, value = sock.calls[0]
+        self.assertEqual(level, socks_server.socket.SOL_SOCKET)
+        self.assertEqual(option, socks_server.SO_BINDTODEVICE)
+        self.assertEqual(value, b"gst18001\x00")
+
+    def test_openvpn_reference_mode_always_accepts_controlled_auth(self):
+        cmd = app.build_openvpn_command(
+            Path("/tmp/test.ovpn"),
+            "gst18001",
+            Path("/tmp/vpngate.auth"),
+        )
+        joined = " ".join(cmd)
+        self.assertIn("--auth-user-pass /tmp/vpngate.auth", joined)
+        self.assertIn("--pull-filter ignore route-ipv6", joined)
+        self.assertIn("--pull-filter ignore ifconfig-ipv6", joined)
+        self.assertIn("--route-nopull", joined)
 
 
 if __name__ == "__main__":

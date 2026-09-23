@@ -41,7 +41,7 @@ SOCKS_SERVER_SCRIPT = APP_DIR / "socks_server.py"
 
 BIND = os.getenv("GATESOCKS_BIND", "0.0.0.0")
 PORT = int(os.getenv("GATESOCKS_PORT", "19080"))
-VERSION = os.getenv("GATESOCKS_VERSION", "0.4.10-dev")
+VERSION = os.getenv("GATESOCKS_VERSION", "0.4.11-dev")
 SOCKS_START = int(os.getenv("GATESOCKS_SOCKS_START", "18001"))
 SOCKS_END = int(os.getenv("GATESOCKS_SOCKS_END", "18099"))
 TEST_START = int(os.getenv("GATESOCKS_TEST_START", "18100"))
@@ -65,7 +65,6 @@ TEST_CONNECT_TIMEOUT = int(os.getenv("GATESOCKS_TEST_CONNECT_TIMEOUT", "30"))
 TEST_DOWNLOAD_BYTES = int(os.getenv("GATESOCKS_TEST_DOWNLOAD_BYTES", "5000000"))
 TEST_UPLOAD_BYTES = int(os.getenv("GATESOCKS_TEST_UPLOAD_BYTES", "1048576"))
 SOCKS_CONNECT_TIMEOUT = int(os.getenv("GATESOCKS_SOCKS_CONNECT_TIMEOUT", "35"))
-SOCKS_MARK_BASE = int(os.getenv("GATESOCKS_SOCKS_MARK_BASE", "12000"))
 SOCKS_TABLE_BASE = int(os.getenv("GATESOCKS_SOCKS_TABLE_BASE", "20000"))
 SOCKS_RULE_PRIORITY_BASE = int(os.getenv("GATESOCKS_SOCKS_RULE_PRIORITY_BASE", "21000"))
 PUBLIC_HOST_ENV = os.getenv("GATESOCKS_PUBLIC_HOST", "").strip()
@@ -586,22 +585,88 @@ def build_openvpn_command(config_path: Path, tun_name: str, auth_path: Path | No
         "--dev-type", "tun",
         "--pull-filter", "ignore", "route-ipv6",
         "--pull-filter", "ignore", "ifconfig-ipv6",
-        "--route-delay", "2",
+        "--route-nopull",
+        "--connect-timeout", "10",
         "--connect-retry-max", "1",
-        "--connect-timeout", "15",
     ]
     if auth_path is not None:
         cmd.extend(["--auth-user-pass", str(auth_path)])
     cmd.extend([
         "--auth-nocache",
         "--disable-dco",
-        "--route-nopull",
-        "--data-ciphers", "AES-128-CBC:AES-256-GCM:AES-128-GCM",
+        "--data-ciphers", "AES-128-CBC:AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305",
+        "--data-ciphers-fallback", "AES-128-CBC",
         "--cipher", "AES-128-CBC",
-        "--reneg-sec", "0",
         "--verb", "3",
     ])
     return cmd
+
+
+def openvpn_log_tail(log_path: Path, limit: int = 1200) -> str:
+    try:
+        return log_path.read_text(encoding="utf-8", errors="replace")[-limit:]
+    except Exception:
+        return ""
+
+
+def wait_openvpn_attempt(proc: subprocess.Popen, log_path: Path, tun_name: str, timeout: int) -> tuple[bool, str]:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if proc.poll() is not None:
+            break
+        log_text = openvpn_log_tail(log_path, 20000)
+        if "Initialization Sequence Completed" in log_text and Path(f"/sys/class/net/{tun_name}").exists():
+            return True, log_text
+        if "AUTH_FAILED" in log_text:
+            return False, log_text
+        time.sleep(0.5)
+    return False, openvpn_log_tail(log_path, 20000)
+
+
+def start_vpngate_openvpn(
+    config_path: Path,
+    tun_name: str,
+    log_path: Path,
+    log_handle,
+    timeout: int,
+) -> tuple[subprocess.Popen, str]:
+    auth_path = write_vpngate_auth_file(config_path.parent)
+    attempts = [
+        ("vpn/vpn", auth_path),
+        ("no-auth-fallback", None),
+    ]
+    last_tail = ""
+    for index, (mode, candidate_auth) in enumerate(attempts):
+        log_handle.write(f"\n=== OpenVPN attempt: {mode} ===\n")
+        log_handle.flush()
+        proc = subprocess.Popen(
+            build_openvpn_command(config_path, tun_name, candidate_auth),
+            stdout=log_handle,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        ok, log_text = wait_openvpn_attempt(proc, log_path, tun_name, timeout)
+        if ok:
+            return proc, mode
+
+        last_tail = log_text[-1200:]
+        terminate_process(proc)
+        subprocess.run(["ip", "link", "del", tun_name], capture_output=True)
+
+        # The supplied reference project always uses vpn/vpn.  GateSocks previously
+        # proved that some VPN Gate relays work only when client auth is omitted, so
+        # retry without credentials only for the explicit server-side AUTH_FAILED case.
+        if index == 0 and "AUTH_FAILED" in log_text:
+            log_handle.write("\n=== AUTH_FAILED with vpn/vpn; retrying without auth ===\n")
+            log_handle.flush()
+            time.sleep(0.5)
+            continue
+        break
+
+    compact = last_tail.replace("\n", " ")[-800:]
+    if "AUTH_FAILED" in last_tail:
+        raise RuntimeError("OpenVPN 服务端返回 AUTH_FAILED（vpn/vpn 与无认证回退均未成功）：" + compact)
+    raise RuntimeError("OpenVPN 未建立隧道：" + compact)
 
 def cleanup_probe_route() -> None:
     subprocess.run(
@@ -660,30 +725,16 @@ def test_one_node(node: dict) -> dict:
     try:
         raw_config_b64 = str(node.get("openvpn_config_b64", ""))
         config_path.write_text(sanitized_ovpn(raw_config_b64), encoding="utf-8")
-        auth_path = write_vpngate_auth_file(work_dir) if vpngate_profile_requests_auth(raw_config_b64) else None
+        os.chmod(config_path, 0o600)
         log_handle = log_path.open("w", encoding="utf-8")
-        cmd = build_openvpn_command(config_path, tun_name, auth_path)
-        proc = subprocess.Popen(cmd, stdout=log_handle, stderr=subprocess.STDOUT, text=True)
-
-        deadline = time.time() + TEST_CONNECT_TIMEOUT
-        connected = False
-        while time.time() < deadline:
-            if proc.poll() is not None:
-                break
-            try:
-                log_text = log_path.read_text(encoding="utf-8", errors="replace")
-            except Exception:
-                log_text = ""
-            if "Initialization Sequence Completed" in log_text and Path(f"/sys/class/net/{tun_name}").exists():
-                connected = True
-                break
-            time.sleep(0.5)
-
-        if log_handle:
-            log_handle.flush()
-        if not connected:
-            tail = log_path.read_text(encoding="utf-8", errors="replace")[-700:]
-            raise RuntimeError("OpenVPN 未建立隧道：" + tail.replace("\n", " ")[-500:])
+        proc, auth_mode = start_vpngate_openvpn(
+            config_path,
+            tun_name,
+            log_path,
+            log_handle,
+            TEST_CONNECT_TIMEOUT,
+        )
+        result["evidence"]["openvpn_auth_mode"] = auth_mode
 
         install_probe_route(tun_name)
 
@@ -846,7 +897,6 @@ def instance_network_values(port: int) -> dict:
         raise ValueError("SOCKS5 port is outside the configured pool")
     return {
         "tun_name": f"gst{int(port)}",
-        "mark": SOCKS_MARK_BASE + slot,
         "route_table": SOCKS_TABLE_BASE + slot,
         "rule_priority": SOCKS_RULE_PRIORITY_BASE + slot,
     }
@@ -931,7 +981,12 @@ def install_instance_policy(instance: dict) -> None:
         check=True, capture_output=True, text=True,
     )
     subprocess.run(
-        ["ip", "rule", "add", "priority", str(instance["rule_priority"]), "fwmark", str(instance["mark"]), "lookup", str(instance["route_table"])],
+        [
+            "ip", "rule", "add",
+            "priority", str(instance["rule_priority"]),
+            "oif", str(instance["tun_name"]),
+            "lookup", str(instance["route_table"]),
+        ],
         check=True, capture_output=True, text=True,
     )
 
@@ -1098,14 +1153,11 @@ def start_socks_instance(instance_id: str) -> dict:
             raw_config_b64 = str(cached_node.get("openvpn_config_b64", ""))
             config_path.write_text(sanitized_ovpn(raw_config_b64), encoding="utf-8")
             os.chmod(config_path, 0o600)
-            instance["vpngate_auth_required"] = vpngate_profile_requests_auth(raw_config_b64)
+            instance["vpngate_auth_required"] = True
             instance["node_id"] = cached_node.get("id") or instance.get("node_id")
             instance["source_hostname"] = cached_node.get("hostname") or instance.get("source_hostname")
         elif "vpngate_auth_required" not in instance:
-            # Old GateSocks instances were created from a profile whose auth directive
-            # was stripped. Default to no forced credentials, matching the previously
-            # successful GateSocks test behavior, until a fresh source profile is available.
-            instance["vpngate_auth_required"] = False
+            instance["vpngate_auth_required"] = True
 
         if not config_path.exists():
             instance["status"] = "error"
@@ -1117,21 +1169,28 @@ def start_socks_instance(instance_id: str) -> dict:
             openvpn_handle = openvpn_log.open("a", encoding="utf-8")
             openvpn_handle.write(f"\n=== GateSocks start {datetime.now(timezone.utc).isoformat()} ===\n")
             openvpn_handle.flush()
-            auth_path = write_vpngate_auth_file(work_dir) if instance.get("vpngate_auth_required") else None
-            vpn_proc = subprocess.Popen(
-                build_openvpn_command(config_path, str(instance["tun_name"]), auth_path),
-                stdout=openvpn_handle,
-                stderr=subprocess.STDOUT,
-                text=True,
+            vpn_proc, auth_mode = start_vpngate_openvpn(
+                config_path,
+                str(instance["tun_name"]),
+                openvpn_log,
+                openvpn_handle,
+                SOCKS_CONNECT_TIMEOUT,
             )
+            instance["openvpn_auth_mode"] = auth_mode
             SOCKS_RUNTIME[instance_id] = {"openvpn": vpn_proc, "socks": None, "openvpn_log_handle": openvpn_handle, "socks_log_handle": None}
-            wait_openvpn_ready(vpn_proc, openvpn_log, str(instance["tun_name"]))
             install_instance_policy(instance)
             socks_handle = socks_log.open("a", encoding="utf-8")
             socks_handle.write(f"\n=== GateSocks start {datetime.now(timezone.utc).isoformat()} ===\n")
             socks_handle.flush()
             socks_proc = subprocess.Popen(
-                ["python", str(SOCKS_SERVER_SCRIPT), "--bind", "0.0.0.0", "--port", str(instance["port"]), "--username", str(instance["username"]), "--password", str(instance["password"]), "--mark", str(instance["mark"])],
+                [
+                    "python", str(SOCKS_SERVER_SCRIPT),
+                    "--bind", "0.0.0.0",
+                    "--port", str(instance["port"]),
+                    "--username", str(instance["username"]),
+                    "--password", str(instance["password"]),
+                    "--interface", str(instance["tun_name"]),
+                ],
                 stdout=socks_handle, stderr=subprocess.STDOUT, text=True,
             )
             SOCKS_RUNTIME[instance_id]["socks"] = socks_proc
@@ -1577,7 +1636,7 @@ async def create_socks(request: Request):
             "country_short": node.get("country_short"),
             "source_ip": node.get("ip"),
             "source_hostname": node.get("hostname"),
-            "vpngate_auth_required": vpngate_profile_requests_auth(str(node.get("openvpn_config_b64", ""))),
+            "vpngate_auth_required": True,
             "port": port,
             "username": "gs_" + secrets.token_hex(4),
             "password": secrets.token_urlsafe(18),
@@ -1679,7 +1738,7 @@ def settings():
             "tun_device": "/dev/net/tun",
             "network_mode": "docker-bridge",
             "caddy_network": os.getenv("GATESOCKS_CADDY_NETWORK", "sublink-worker_default"),
-            "socks_routing": "socket-fwmark-policy-routing",
+            "socks_routing": "SO_BINDTODEVICE + oif policy routing",
             "public_host": detect_public_host(),
         },
         "nodes": {

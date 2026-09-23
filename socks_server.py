@@ -5,7 +5,7 @@ import socket
 import socketserver
 import struct
 
-SO_MARK = getattr(socket, "SO_MARK", 36)
+SO_BINDTODEVICE = getattr(socket, "SO_BINDTODEVICE", 25)
 
 
 def recv_exact(sock: socket.socket, size: int) -> bytes:
@@ -18,15 +18,25 @@ def recv_exact(sock: socket.socket, size: int) -> bytes:
     return bytes(data)
 
 
-def marked_connect(host: str, port: int, mark: int, timeout: float = 15.0) -> socket.socket:
+def bind_socket_to_interface(sock: socket.socket, interface: str) -> None:
+    if not interface:
+        raise ValueError("SOCKS5 outbound interface is required")
+    sock.setsockopt(
+        socket.SOL_SOCKET,
+        SO_BINDTODEVICE,
+        interface.encode("utf-8") + b"\0",
+    )
+
+
+def interface_connect(host: str, port: int, interface: str, timeout: float = 20.0) -> socket.socket:
     infos = socket.getaddrinfo(host, port, socket.AF_UNSPEC, socket.SOCK_STREAM)
     infos.sort(key=lambda item: 0 if item[0] == socket.AF_INET else 1)
     last_error = None
     for family, socktype, proto, _, sockaddr in infos:
         upstream = socket.socket(family, socktype, proto)
         try:
-            upstream.setsockopt(socket.SOL_SOCKET, SO_MARK, int(mark))
             upstream.settimeout(timeout)
+            bind_socket_to_interface(upstream, interface)
             upstream.connect(sockaddr)
             upstream.settimeout(None)
             return upstream
@@ -51,7 +61,7 @@ def reply_address(sock: socket.socket) -> bytes:
 class SocksHandler(socketserver.BaseRequestHandler):
     def handle(self):
         client = self.request
-        client.settimeout(20)
+        client.settimeout(30)
         try:
             version, count = recv_exact(client, 2)
             if version != 5:
@@ -71,6 +81,7 @@ class SocksHandler(socketserver.BaseRequestHandler):
                 client.sendall(b"\x01\x01")
                 return
             client.sendall(b"\x01\x00")
+
             version, command, _, atyp = recv_exact(client, 4)
             if version != 5 or command != 1:
                 client.sendall(b"\x05\x07\x00\x01\x00\x00\x00\x00\x00\x00")
@@ -86,11 +97,13 @@ class SocksHandler(socketserver.BaseRequestHandler):
                 client.sendall(b"\x05\x08\x00\x01\x00\x00\x00\x00\x00\x00")
                 return
             port = struct.unpack("!H", recv_exact(client, 2))[0]
+
             try:
-                upstream = marked_connect(host, port, self.server.mark)
+                upstream = interface_connect(host, port, self.server.interface)
             except OSError:
                 client.sendall(b"\x05\x05\x00\x01\x00\x00\x00\x00\x00\x00")
                 return
+
             with upstream:
                 client.sendall(reply_address(upstream))
                 client.settimeout(None)
@@ -112,11 +125,11 @@ class ThreadingSocksServer(socketserver.ThreadingTCPServer):
     allow_reuse_address = True
     daemon_threads = True
 
-    def __init__(self, address, handler, username: str, password: str, mark: int):
+    def __init__(self, address, handler, username: str, password: str, interface: str):
         super().__init__(address, handler)
         self.username = username
         self.password = password
-        self.mark = int(mark)
+        self.interface = interface
 
 
 def main():
@@ -125,9 +138,15 @@ def main():
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("--username", required=True)
     parser.add_argument("--password", required=True)
-    parser.add_argument("--mark", type=int, required=True)
+    parser.add_argument("--interface", required=True)
     args = parser.parse_args()
-    with ThreadingSocksServer((args.bind, args.port), SocksHandler, args.username, args.password, args.mark) as server:
+    with ThreadingSocksServer(
+        (args.bind, args.port),
+        SocksHandler,
+        args.username,
+        args.password,
+        args.interface,
+    ) as server:
         server.serve_forever(poll_interval=0.5)
 
 
