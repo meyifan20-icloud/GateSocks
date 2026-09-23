@@ -1,0 +1,43 @@
+import base64
+import unittest
+from pathlib import Path
+
+import app
+
+
+class EngineTests(unittest.TestCase):
+    def test_vpngate_profile_sanitizer(self):
+        raw = """client
+dev tun
+proto tcp
+remote 203.0.113.10 443
+route 0.0.0.0 0.0.0.0
+redirect-gateway def1
+config /etc/passwd
+up /tmp/hook.sh
+<ca>
+CERTDATA
+</ca>
+"""
+        clean = app.sanitized_ovpn(base64.b64encode(raw.encode()).decode())
+        self.assertIn("client", clean)
+        self.assertIn("remote 203.0.113.10 443", clean)
+        self.assertIn("<ca>", clean)
+        self.assertNotIn("redirect-gateway", clean)
+        self.assertNotIn("config /etc/passwd", clean)
+        self.assertNotIn("up /tmp/hook.sh", clean)
+        self.assertNotIn("dev tun", clean)
+
+    def test_openvpn_command_has_explicit_tun_and_vpngate_cipher(self):
+        cmd = app.build_openvpn_command(Path("/tmp/test.ovpn"), "tun-gstest0")
+        joined = " ".join(cmd)
+        self.assertIn("--dev tun-gstest0", joined)
+        self.assertIn("--dev-type tun", joined)
+        self.assertIn("--disable-dco", joined)
+        self.assertIn("--route-nopull", joined)
+        self.assertIn("AES-128-CBC", joined)
+        self.assertNotIn("--hand-window", joined)
+
+
+if __name__ == "__main__":
+    unittest.main()

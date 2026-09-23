@@ -247,7 +247,7 @@ async function loadTests(){
       const state=document.createElement("span"); state.className="pill "+(t.status==="available"?"ok":""); state.textContent=statusText(t.status);
       head.append(left,state);
       const grid=document.createElement("div"); grid.className="mini-grid";
-      [["出口 IP",t.exit_ip||"-"],["延迟",t.latency_ms==null?"-":t.latency_ms+" ms"],["下载",t.download_mbps==null?"-":t.download_mbps+" Mbps"],["上传",t.upload_mbps==null?"-":t.upload_mbps+" Mbps"],["稳定性",t.stability_percent==null?"-":t.stability_percent+"%"],["住宅/风险",(t.residential_hint||"未知")+" / "+(t.risk||"未知")]].forEach(([a,b])=>{const d=document.createElement("div");const s=document.createElement("span");s.textContent=a;const v=document.createElement("strong");v.textContent=b;d.append(s,v);grid.appendChild(d);});
+      [["出口 IP",t.exit_ip||"-"],["延迟",t.latency_ms==null?"-":t.latency_ms+" ms"],["下载",t.download_mbps==null?"-":t.download_mbps+" Mbps"],["上传",t.upload_mbps==null?"-":t.upload_mbps+" Mbps"],["短时成功率",t.stability_percent==null?"-":t.stability_percent+"%"],["住宅/风险",(t.residential_hint||"未知")+" / "+(t.risk||"未知")]].forEach(([a,b])=>{const d=document.createElement("div");const s=document.createElement("span");s.textContent=a;const v=document.createElement("strong");v.textContent=b;d.append(s,v);grid.appendChild(d);});
       card.append(head,grid);
       if(t.error){const err=document.createElement("p");err.className="form-message error";err.textContent=t.error;card.appendChild(err);}
       list.appendChild(card);

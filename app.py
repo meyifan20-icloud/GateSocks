@@ -9,6 +9,7 @@ import platform
 import re
 import secrets
 import socket
+import statistics
 import subprocess
 import tempfile
 import threading
@@ -32,7 +33,7 @@ TEST_RESULTS_FILE = DATA_DIR / "test_results.json"
 
 BIND = os.getenv("GATESOCKS_BIND", "0.0.0.0")
 PORT = int(os.getenv("GATESOCKS_PORT", "19080"))
-VERSION = os.getenv("GATESOCKS_VERSION", "0.4.1-dev")
+VERSION = os.getenv("GATESOCKS_VERSION", "0.4.2-dev")
 SOCKS_START = int(os.getenv("GATESOCKS_SOCKS_START", "18001"))
 SOCKS_END = int(os.getenv("GATESOCKS_SOCKS_END", "18099"))
 TEST_START = int(os.getenv("GATESOCKS_TEST_START", "18100"))
@@ -49,9 +50,9 @@ VPNGATE_URL = os.getenv("GATESOCKS_VPNGATE_URL", "https://www.vpngate.net/api/ip
 VPNGATE_TIMEOUT = int(os.getenv("GATESOCKS_VPNGATE_TIMEOUT", "15"))
 VPNGATE_MAX_NODES = int(os.getenv("GATESOCKS_VPNGATE_MAX_NODES", "500"))
 TEST_BATCH_LIMIT = int(os.getenv("GATESOCKS_TEST_BATCH_LIMIT", "5"))
-TEST_CONNECT_TIMEOUT = int(os.getenv("GATESOCKS_TEST_CONNECT_TIMEOUT", "18"))
-TEST_DOWNLOAD_BYTES = int(os.getenv("GATESOCKS_TEST_DOWNLOAD_BYTES", "2000000"))
-TEST_UPLOAD_BYTES = int(os.getenv("GATESOCKS_TEST_UPLOAD_BYTES", "524288"))
+TEST_CONNECT_TIMEOUT = int(os.getenv("GATESOCKS_TEST_CONNECT_TIMEOUT", "30"))
+TEST_DOWNLOAD_BYTES = int(os.getenv("GATESOCKS_TEST_DOWNLOAD_BYTES", "5000000"))
+TEST_UPLOAD_BYTES = int(os.getenv("GATESOCKS_TEST_UPLOAD_BYTES", "1048576"))
 PROBE_UID = 65534
 PROBE_TABLE = 100
 PROBE_RULE_PRIORITY = 10000
@@ -64,6 +65,7 @@ AUTH_LOCK = threading.Lock()
 NODE_LOCK = threading.Lock()
 TEST_LOCK = threading.Lock()
 TEST_JOB = {"running": False, "total": 0, "completed": 0, "current_id": None, "started_at": None, "finished_at": None, "last_error": None}
+IP_META_CACHE: dict[str, dict] = {}
 
 app = FastAPI(title="GateSocks", version=VERSION)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -348,19 +350,24 @@ def resolve_ipv4(host: str) -> str:
     return infos[0][4][0]
 
 
-def run_probe_curl(args: list[str], timeout: int = 25) -> str:
+def run_probe_curl(args: list[str], timeout: int = 25, input_bytes: bytes | None = None) -> str:
     cmd = [
         "setpriv",
         "--reuid", str(PROBE_UID),
         "--regid", str(PROBE_UID),
         "--clear-groups",
+        "--inh-caps=-all",
+        "--bounding-set=-all",
+        "--no-new-privs",
         "curl",
     ] + args
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    proc = subprocess.run(cmd, input=input_bytes, capture_output=True, timeout=timeout)
+    stdout = proc.stdout.decode("utf-8", errors="replace")
+    stderr = proc.stderr.decode("utf-8", errors="replace")
     if proc.returncode != 0:
-        detail = (proc.stderr or proc.stdout or "curl failed").strip()
+        detail = (stderr or stdout or "curl failed").strip()
         raise RuntimeError(detail[-240:])
-    return proc.stdout.strip()
+    return stdout.strip()
 
 
 def curl_https_text(host: str, url: str, timeout: int = 12) -> str:
@@ -374,7 +381,14 @@ def curl_https_text(host: str, url: str, timeout: int = 12) -> str:
     ], timeout=timeout + 5)
 
 
-def curl_https_metric(host: str, url: str, metric: str, timeout: int = 15, extra: list[str] | None = None) -> float:
+def curl_https_metric(
+    host: str,
+    url: str,
+    metric: str,
+    timeout: int = 15,
+    extra: list[str] | None = None,
+    input_bytes: bytes | None = None,
+) -> float:
     ip = resolve_ipv4(host)
     args = [
         "-4", "-sS", "--fail",
@@ -385,10 +399,12 @@ def curl_https_metric(host: str, url: str, metric: str, timeout: int = 15, extra
     if extra:
         args.extend(extra)
     args.extend(["-o", "/dev/null", "-w", f"%{{{metric}}}", url])
-    return float(run_probe_curl(args, timeout=timeout + 5))
+    return float(run_probe_curl(args, timeout=timeout + 5, input_bytes=input_bytes))
 
 
 def ip_metadata(exit_ip: str) -> dict:
+    if exit_ip in IP_META_CACHE:
+        return IP_META_CACHE[exit_ip]
     url = (
         f"http://ip-api.com/json/{exit_ip}"
         "?fields=status,message,country,countryCode,isp,org,as,asname,mobile,proxy,hosting,query"
@@ -397,9 +413,12 @@ def ip_metadata(exit_ip: str) -> dict:
     try:
         with urllib.request.urlopen(req, timeout=7) as response:
             data = json.loads(response.read().decode("utf-8", errors="replace"))
-            return data if data.get("status") == "success" else {}
+            if data.get("status") == "success":
+                IP_META_CACHE[exit_ip] = data
+                return data
     except Exception:
-        return {}
+        pass
+    return {}
 
 
 def sanitized_ovpn(config_b64: str) -> str:
@@ -413,7 +432,10 @@ def sanitized_ovpn(config_b64: str) -> str:
         "client-connect", "client-disconnect", "plugin", "script-security",
         "management", "management-client-user", "management-client-group",
         "redirect-gateway", "route", "route-ipv6", "dhcp-option",
-        "pull-filter", "dev", "dev-type",
+        "pull-filter", "dev", "dev-type", "config", "cd", "chroot",
+        "daemon", "log", "log-append", "status", "writepid", "user", "group",
+        "askpass", "auth-user-pass", "http-proxy", "http-proxy-user-pass",
+        "socks-proxy", "tls-crypt-v2-verify",
     }
     output = []
     in_inline = False
@@ -438,6 +460,23 @@ def sanitized_ovpn(config_b64: str) -> str:
     return "\n".join(output) + "\n"
 
 
+def build_openvpn_command(config_path: Path, tun_name: str) -> list[str]:
+    return [
+        "openvpn",
+        "--config", str(config_path),
+        "--dev", tun_name,
+        "--dev-type", "tun",
+        "--disable-dco",
+        "--route-nopull",
+        "--data-ciphers", "AES-128-CBC:AES-256-GCM:AES-128-GCM",
+        "--cipher", "AES-128-CBC",
+        "--connect-retry-max", "1",
+        "--reneg-sec", "0",
+        "--auth-nocache",
+        "--verb", "3",
+    ]
+
+
 def cleanup_probe_route() -> None:
     subprocess.run(
         ["ip", "rule", "del", "priority", str(PROBE_RULE_PRIORITY), "uidrange", f"{PROBE_UID}-{PROBE_UID}", "lookup", str(PROBE_TABLE)],
@@ -460,12 +499,11 @@ def install_probe_route(tun_name: str) -> None:
 
 def test_one_node(node: dict) -> dict:
     node_id = str(node.get("id", "unknown"))
-    tun_name = "gstest0"
+    tun_name = "tun-gstest0"
     tested_at = datetime.now(timezone.utc).isoformat()
     work_dir = Path(tempfile.mkdtemp(prefix="gatesocks-test-"))
     config_path = work_dir / "node.ovpn"
     log_path = work_dir / "openvpn.log"
-    upload_path = work_dir / "upload.bin"
     proc = None
     log_handle = None
     result = {
@@ -488,22 +526,8 @@ def test_one_node(node: dict) -> dict:
 
     try:
         config_path.write_text(sanitized_ovpn(str(node.get("openvpn_config_b64", ""))), encoding="utf-8")
-        upload_path.write_bytes(b"0" * TEST_UPLOAD_BYTES)
-        os.chmod(upload_path, 0o644)
-
         log_handle = log_path.open("w", encoding="utf-8")
-        cmd = [
-            "openvpn",
-            "--config", str(config_path),
-            "--dev", tun_name,
-            "--route-nopull",
-            "--connect-retry-max", "1",
-            "--connect-timeout", "10",
-            "--hand-window", "10",
-            "--reneg-sec", "0",
-            "--auth-nocache",
-            "--verb", "3",
-        ]
+        cmd = build_openvpn_command(config_path, tun_name)
         proc = subprocess.Popen(cmd, stdout=log_handle, stderr=subprocess.STDOUT, text=True)
 
         deadline = time.time() + TEST_CONNECT_TIMEOUT
@@ -548,8 +572,11 @@ def test_one_node(node: dict) -> dict:
         result["exit_ip"] = exit_ip
 
         try:
-            latency_sec = curl_https_metric(exit_host, exit_url, "time_appconnect", timeout=10)
-            result["latency_ms"] = round(latency_sec * 1000, 1)
+            latency_samples = [
+                curl_https_metric(exit_host, exit_url, "time_connect", timeout=10)
+                for _ in range(3)
+            ]
+            result["latency_ms"] = round(statistics.median(latency_samples) * 1000, 1)
         except Exception:
             pass
 
@@ -580,7 +607,8 @@ def test_one_node(node: dict) -> dict:
                 "https://speed.cloudflare.com/__up",
                 "speed_upload",
                 timeout=15,
-                extra=["-X", "POST", "--data-binary", f"@{upload_path}"],
+                extra=["-X", "POST", "--data-binary", "@-"],
+                input_bytes=b"0" * TEST_UPLOAD_BYTES,
             )
             result["upload_mbps"] = round(speed_bps * 8 / 1_000_000, 2)
         except Exception:
@@ -594,14 +622,14 @@ def test_one_node(node: dict) -> dict:
             proxy = bool(meta.get("proxy"))
             mobile = bool(meta.get("mobile"))
             if hosting or proxy:
-                result["residential_hint"] = "非住宅倾向"
-                result["risk"] = "高"
+                result["residential_hint"] = "非住宅/代理倾向"
+                result["risk"] = "公开库已标记"
             elif mobile:
-                result["residential_hint"] = "移动网络"
-                result["risk"] = "低"
+                result["residential_hint"] = "移动网络倾向"
+                result["risk"] = "需复核"
             else:
-                result["residential_hint"] = "住宅倾向（需复核）"
-                result["risk"] = "低"
+                result["residential_hint"] = "未发现机房标记（需复核）"
+                result["risk"] = "未知"
 
         result["status"] = "available" if result["stability_percent"] >= 67 else "unavailable"
         return result

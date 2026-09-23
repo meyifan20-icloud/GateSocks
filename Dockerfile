@@ -1,7 +1,7 @@
 FROM python:3.12-slim
 
 ARG DEBIAN_FRONTEND=noninteractive
-ARG GATESOCKS_VERSION=0.4.1-dev
+ARG GATESOCKS_VERSION=0.4.2-dev
 
 LABEL org.opencontainers.image.title="GateSocks" \
       org.opencontainers.image.description="SOCKS5 exit manager and web panel" \
@@ -28,7 +28,11 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 
 COPY app.py /app/app.py
 COPY static /app/static
-RUN python -m py_compile /app/app.py
+RUN python -m py_compile /app/app.py \
+    && openvpn --version | head -n 1 \
+    && setpriv --version \
+    && ip -Version \
+    && curl --version | head -n 1
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

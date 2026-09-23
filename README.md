@@ -2,7 +2,7 @@
 
 GateSocks 是一个面向个人 VPS 的 SOCKS5 出口筛选、验证与管理项目。Web 面板负责节点池、SOCKS5、OpenVPN 隧道、测试记录、日志和设置；OpenVPN 是底层出口隧道，SOCKS5 是主要使用入口。
 
-当前开发版本：`v0.4.1-dev`。
+当前开发版本：`v0.4.2-dev`。
 
 ## Docker image
 
@@ -97,3 +97,15 @@ gatesocks.zhangbao20.ccwu.cc:2096 {
 - 使用公开 IP 属性接口补充 ISP/ASN 与 hosting/proxy/mobile 信号；“住宅倾向”保留“需复核”标记，不把单一数据库信号当作住宅 IP 的绝对证明。
 - OpenVPN 配置在执行前移除脚本、plugin、management、route/redirect-gateway 等会执行外部代码或改变全局路由的指令。
 - 测试记录页同步展示成功与失败原因；实测按钮支持任务进度轮询。
+
+
+## v0.4.2-dev
+
+- 按 OpenVPN 官方文档修正临时设备：使用 `tun-gstest0` + `--dev-type tun`，解决自定义设备名无法识别的问题。
+- 显式 `--disable-dco`，让临时测试固定走传统 TUN；为 VPN Gate / SoftEther 兼容显式加入 `AES-128-CBC` 到 `data-ciphers`。
+- 删除过短的 TLS `hand-window` 覆盖，连接总等待改为 30 秒，降低高延迟公益节点的误判。
+- 测速 curl 以独立低权限 UID 运行，并从 stdin 上传测试数据，避免低权限进程无法读取 root 私有临时目录。
+- 延迟改为 3 次 TCP 建连时间中位数；Cloudflare `__down/__up` 只用于隧道吞吐抽样。
+- 扩展 VPN Gate 配置清洗：拒绝嵌套 config、脚本、代理、daemon/chroot/log/user/group 等与候选测试无关或可能改变进程行为的指令。
+- 住宅/风险只显示公开 IP 数据库的辅助信号，不再把“未发现 hosting/proxy 标记”直接等同于“低风险住宅 IP”。
+- GitHub Actions 增加 Python 编译、单元测试、JavaScript 语法和 Compose 配置预检，避免仅靠镜像能否构建判断代码正确性。

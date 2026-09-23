@@ -6,7 +6,7 @@
   <title>GateSocks</title>
   <link rel="icon" href="/favicon.ico" sizes="any">
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-  <link rel="stylesheet" href="/static/app.css?v=0.4.1-dev">
+  <link rel="stylesheet" href="/static/app.css?v=0.4.2-dev">
 </head>
 <body>
 <div class="app-shell">
@@ -25,7 +25,7 @@
       <button class="nav-item" data-page="settings">设置</button>
     </nav>
     <div class="sidebar-foot">
-      <span id="version">v0.4.1-dev</span>
+      <span id="version">v0.4.2-dev</span>
       <span class="status-dot"></span> Development
     </div>
   </aside>
@@ -89,7 +89,7 @@
         </div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>地区</th><th>节点 IP</th><th>ISP / ASN</th><th>住宅判断</th><th>延迟</th><th>下载</th><th>上传</th><th>稳定性</th><th>风险</th><th>状态</th><th>操作</th></tr></thead>
+            <thead><tr><th>地区</th><th>节点 IP</th><th>ISP / ASN</th><th>住宅判断</th><th>延迟（实测/源）</th><th>下载（实测/源）</th><th>上传（实测）</th><th>短时成功率</th><th>风险</th><th>状态</th><th>操作</th></tr></thead>
             <tbody id="nodesTable"><tr><td colspan="11"><div class="empty compact">暂无节点数据</div></td></tr></tbody>
           </table>
         </div>
@@ -183,11 +183,11 @@
 
       <article class="panel notice">
         <strong>开发版说明</strong>
-        <p>当前已接入 VPN Gate 候选资源池、OpenVPN 安全实连测试与面板账号修改。实测使用独立 UID 策略路由，只让测速进程走临时 VPN 隧道，不修改 GateSocks Web 服务的默认路由；住宅属性属于第三方网络属性信号，应视为倾向判断而非绝对证明。</p>
+        <p>当前已接入 VPN Gate 候选资源池、OpenVPN 安全实连测试与面板账号修改。实测使用独立 UID 策略路由，只让测速进程走临时 VPN 隧道，不修改 GateSocks Web 服务的默认路由。带 * 的 Ping/线路速度来自 VPN Gate；无 * 的延迟/吞吐才是本 VPS 实测。住宅/风险字段仅为公开 IP 数据库信号，不作为绝对结论。</p>
       </article>
     </section>
   </main>
 </div>
-<script src="/static/app.js?v=0.4.1-dev"></script>
+<script src="/static/app.js?v=0.4.2-dev"></script>
 </body>
 </html>
